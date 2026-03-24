@@ -1,28 +1,72 @@
-本專案採用 React + PixiJS 的現代化網頁遊戲架構，結合了 React 的強大狀態管理與 PixiJS 的極致渲染效能。
+# Party Pool 2
 
-核心開發環境 (Development Environment)
-React (v18+):
+多人派對網頁遊戲（主畫面 + 手機控制器），依 `規格書.md` 與 `遊戲機制.md` 實作 MVP。
 
-職責：負責遊戲整體的生命週期管理、組件化開發以及複雜的 UI 系統。
+## 技術堆疊
 
-Vite + TypeScript:
+- 前端：React + Vite + TypeScript
+- 遊戲渲染：PixiJS + `@pixi/react`
+- 物理：Matter.js
+- 狀態管理：Zustand
+- 即時通訊：WebSocket (`ws`)
+- 共用型別：`packages/shared`
 
-職責：提供極速的開發熱更新（HMR）與強型別支持，確保大規模遊戲邏輯的可維護性。
+## 開發模式（TDD，強制）
 
-渲染與遊戲核心 (Rendering & Core)
-PixiJS (v8+):
+本專案採 **測試先行（Test-Driven Development）**：
 
-定位：底層 WebGL/WebGPU 渲染核心。
+1. `Red`：先寫測試，且測試必須先失敗。
+2. `Green`：只寫最小實作讓測試通過。
+3. `Refactor`：在測試保護下重構與清理。
 
-@pixi/react:
+### TDD 規則
 
-職責：將 PixiJS 封裝為 React 組件，允許使用 JSX 語法（如 <Stage>, <Sprite>, <Container>）來構建遊戲場景。
+- 任何新功能都要先有測試，再寫實作。
+- Bug 修復必須先補「可重現該 bug 的測試」。
+- PR/提交前至少要跑過本地測試與型別檢查。
 
-物理與功能模組 (Physics & Utility)
-Matter.js:
+## 專案結構
 
-職責：處理 2D 物理碰撞、重力與剛體模擬，透過 React 的 useTick 鉤子與渲染層同步。
+```text
+.
+├─ apps/
+│  ├─ web/        # 主畫面 + 手機控制器前端
+│  └─ server/     # WebSocket 即時伺服器
+├─ packages/
+│  └─ shared/     # 前後端共用事件型別與常數
+├─ 規格書.md
+└─ 遊戲機制.md
+```
 
-Zustand:
+## 開發指令
 
-職責：輕量化狀態管理，負責跨組件的遊戲數據（如分數、關卡狀態、玩家屬性）同步。
+```bash
+npm install
+npm run dev        # 同時啟動 web + server
+npm run dev:web
+npm run dev:server
+```
+
+驗證指令（已可用）：
+
+```bash
+npm run test
+npm run check
+npm run build
+```
+
+預設服務位址：
+
+- Web: `http://localhost:5173`
+- WebSocket Server: `ws://localhost:8787`
+- 前端可透過 `VITE_WS_URL` 覆寫 WS 位址
+
+## Task 階段規劃（MVP）
+
+1. Phase 1：房間核心（建立/加入/重連/等待室同步）
+2. Phase 2：準備流程（OK 機制、60 秒倒數、自動開局）
+3. Phase 3：第一關 Tap Challenge（輸入、計分、單回合結果）
+4. Phase 4：三回合整局結算（同分並列、再來一局）
+5. Phase 5：UI/語系/權限與穩定性（中英切換、DeviceMotion 條件授權）
+
+目前進度：Phase 1 已啟動並完成第一輪可運行版本（開房/加入/準備倒數/自動開局）。

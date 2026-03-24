@@ -1,0 +1,120 @@
+.app-shell {
+  width: min(940px, 92vw);
+  margin: 24px auto 36px;
+  display: grid;
+  gap: 14px;
+}
+
+.hero {
+  background: linear-gradient(120deg, #ffedd2, #ffd9c8);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  display: grid;
+  gap: 8px;
+}
+
+.hero p {
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: grid;
+  gap: 6px;
+}
+
+.row label {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.row input {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.actions button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--brand-soft);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.actions button:first-child {
+  background: var(--brand);
+  color: #fff;
+}
+
+.actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.player-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.player-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.error {
+  border-color: #f1b4a6;
+  background: #fff4f1;
+}
+
+.error p {
+  color: var(--error);
+  font-weight: 600;
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    width: calc(100vw - 18px);
+    margin: 10px auto 20px;
+  }
+
+  .player-list li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

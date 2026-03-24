@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+
+:root {
+  --bg: #fff6e8;
+  --panel: #fffdf8;
+  --ink: #2f261f;
+  --muted: #6e6258;
+  --line: #e7d8c7;
+  --brand: #e76f51;
+  --brand-soft: #fbe1d8;
+  --ok: #14746f;
+  --warn: #9c6644;
+  --error: #b42318;
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 15% 20%, #ffe0b8 0%, transparent 38%),
+    radial-gradient(circle at 85% 10%, #ffd6cc 0%, transparent 35%),
+    var(--bg);
+  font-family: 'Noto Sans TC', 'Lexend', sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-family: 'Lexend', 'Noto Sans TC', sans-serif;
+  letter-spacing: 0.02em;
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}

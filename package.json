@@ -1,0 +1,20 @@
+{
+  "name": "party-pool-2",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Party Pool MVP monorepo",
+  "workspaces": [
+    "apps/web",
+    "apps/server",
+    "packages/shared"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @party-pool/server & npm run dev -w web",
+    "dev:web": "npm run dev -w web",
+    "dev:server": "npm run dev -w @party-pool/server",
+    "test": "npm run test -w @party-pool/shared && npm run test -w @party-pool/server && npm run test -w web",
+    "test:watch": "npm run test:watch -w @party-pool/shared & npm run test:watch -w @party-pool/server",
+    "build": "npm run build -w @party-pool/shared && npm run build -w @party-pool/server && npm run build -w web",
+    "check": "npm run typecheck -w @party-pool/shared && npm run typecheck -w @party-pool/server && npm run typecheck -w web"
+  }
+}
