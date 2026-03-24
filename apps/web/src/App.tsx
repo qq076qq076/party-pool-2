@@ -6,20 +6,31 @@ import { applyServerMessage, initialLobbyState } from './domain/lobby'
 import './App.css'
 
 const DEFAULT_WS_URL = 'ws://localhost:8787'
-const DEFAULT_NICKNAME = 'Player'
+const HOST_NICKNAME = 'Host'
+const JOINER_NICKNAME = 'Display'
 
 const getWsUrl = (): string => import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL
+const getRoomCodeFromUrl = (): string =>
+  new URLSearchParams(window.location.search).get('roomCode')?.trim().toUpperCase() ?? ''
 
 function App() {
+  const initialRoomCode = getRoomCodeFromUrl()
   const wsRef = useRef<WebSocket | null>(null)
+  const lobbyStateRef = useRef(initialLobbyState)
+  const autoJoinRequestedRef = useRef<string | null>(null)
+  const autoReadySentRef = useRef<string | null>(null)
+  const pendingHostActionRef = useRef<'start_game' | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
   const [lobbyState, setLobbyState] = useState(initialLobbyState)
-  const [nickname, setNickname] = useState(DEFAULT_NICKNAME)
-  const [roomCodeInput, setRoomCodeInput] = useState('')
+  const [joinMode, setJoinMode] = useState(initialRoomCode.length > 0)
+  const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode)
   const [localError, setLocalError] = useState<string | null>(null)
+  const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(Date.now())
+  const [localTapCount, setLocalTapCount] = useState(0)
 
   const wsUrl = useMemo(() => getWsUrl(), [])
+  const isDevMode = import.meta.env.DEV || import.meta.env.MODE === 'test'
 
   const sendMessage = useCallback((message: ClientMessage): void => {
     const ws = wsRef.current
@@ -37,6 +48,10 @@ function App() {
     )
     setLocalError(null)
   }, [])
+
+  useEffect(() => {
+    lobbyStateRef.current = lobbyState
+  }, [lobbyState])
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl)
@@ -58,6 +73,56 @@ function App() {
     ws.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data as string) as ServerMessage
+
+        if (
+          message.event === 'room_joined' &&
+          message.payload.rejoined &&
+          message.payload.isHost &&
+          pendingHostActionRef.current === 'start_game'
+        ) {
+          sendMessage({
+            event: 'host_enter_ready_phase',
+            payload: {
+              roomCode: message.payload.room.roomCode
+            }
+          })
+        }
+
+        if (
+          message.event === 'ready_timer_started' ||
+          message.event === 'game_started' ||
+          (message.event === 'room_state_updated' &&
+            (message.payload.room.status === 'readying' || message.payload.room.status === 'playing'))
+        ) {
+          pendingHostActionRef.current = null
+        }
+
+        if (message.event === 'error') {
+          if (message.payload.code === 'NOT_ROOM_HOST') {
+            const current = lobbyStateRef.current
+            if (current.room && current.rejoinToken) {
+              sendMessage({
+                event: 'request_rejoin',
+                payload: {
+                  roomCode: current.room.roomCode,
+                  rejoinToken: current.rejoinToken,
+                  nickname: current.isHost ? HOST_NICKNAME : JOINER_NICKNAME
+                }
+              })
+              setLocalError('房主連線失效，正在自動重連...')
+              return
+            }
+          }
+
+          pendingHostActionRef.current = null
+
+          if (message.payload.code === 'ROOM_NOT_FOUND') {
+            setLocalError('房間已不存在，請重新開房間。')
+          }
+        } else {
+          setLocalError(null)
+        }
+
         setLobbyState((previous) => applyServerMessage(previous, message))
       } catch {
         setLocalError('收到無法解析的伺服器訊息。')
@@ -68,86 +133,109 @@ function App() {
       ws.close()
       wsRef.current = null
     }
-  }, [wsUrl])
-
-  useEffect(() => {
-    if (!lobbyState.readyDeadlineAt) {
-      return
-    }
-
-    const timer = setInterval(() => {
-      setClock(Date.now())
-    }, 200)
-
-    return () => {
-      clearInterval(timer)
-    }
-  }, [lobbyState.readyDeadlineAt])
+  }, [sendMessage, wsUrl])
 
   useEffect(() => {
     if (!lobbyState.room || !lobbyState.rejoinToken) {
       return
     }
 
-    const key = `rejoin:${lobbyState.room.roomCode}`
-    localStorage.setItem(key, lobbyState.rejoinToken)
+    localStorage.setItem(`rejoin:${lobbyState.room.roomCode}`, lobbyState.rejoinToken)
   }, [lobbyState.room, lobbyState.rejoinToken])
 
-  const selfPlayer = useMemo(() => {
-    if (!lobbyState.room || !lobbyState.selfPlayerId) {
-      return null
-    }
-
-    return lobbyState.room.players.find((player) => player.playerId === lobbyState.selfPlayerId) ?? null
-  }, [lobbyState.room, lobbyState.selfPlayerId])
-
-  const remainingReadySeconds =
-    lobbyState.readyDeadlineAt === null ? null : Math.max(0, Math.ceil((lobbyState.readyDeadlineAt - clock) / 1000))
-
-  const startRoom = () => {
-    if (!nickname.trim()) {
-      setLocalError('請先輸入暱稱。')
+  useEffect(() => {
+    if (!lobbyState.activeRound) {
       return
     }
 
+    setLocalTapCount(0)
+    const timer = setInterval(() => {
+      setClock(Date.now())
+    }, 100)
+
+    return () => {
+      clearInterval(timer)
+    }
+  }, [lobbyState.activeRound])
+
+  const selfPlayer =
+    lobbyState.room?.players.find((player) => player.playerId === lobbyState.selfPlayerId) ?? null
+
+  useEffect(() => {
+    if (!wsConnected || lobbyState.room || !initialRoomCode) {
+      return
+    }
+
+    if (autoJoinRequestedRef.current === initialRoomCode) {
+      return
+    }
+
+    autoJoinRequestedRef.current = initialRoomCode
+    sendMessage({
+      event: 'join_room',
+      payload: {
+        roomCode: initialRoomCode,
+        nickname: JOINER_NICKNAME
+      }
+    })
+  }, [initialRoomCode, lobbyState.room, sendMessage, wsConnected])
+
+  useEffect(() => {
+    if (!wsConnected || !lobbyState.room || !selfPlayer) {
+      return
+    }
+
+    if (lobbyState.room.status !== 'readying' || selfPlayer.readyStatus === 'ok') {
+      return
+    }
+
+    const autoReadyKey = `${lobbyState.room.roomCode}:${lobbyState.room.roundNo}:${selfPlayer.playerId}`
+    if (autoReadySentRef.current === autoReadyKey) {
+      return
+    }
+
+    autoReadySentRef.current = autoReadyKey
+    sendMessage({
+      event: 'player_ready_ok',
+      payload: {
+        roomCode: lobbyState.room.roomCode,
+        playerId: selfPlayer.playerId
+      }
+    })
+  }, [lobbyState.room, selfPlayer, sendMessage, wsConnected])
+
+  const startRoom = () => {
     sendMessage({
       event: 'create_room',
       payload: {
-        nickname,
+        nickname: HOST_NICKNAME,
         maxPlayers: 8
       }
     })
   }
 
   const joinRoom = () => {
-    if (!nickname.trim()) {
-      setLocalError('請先輸入暱稱。')
-      return
-    }
-
     const code = roomCodeInput.trim().toUpperCase()
     if (!code) {
-      setLocalError('請輸入房間碼。')
+      setLocalError('請輸入房間碼')
       return
     }
-
-    const rejoinToken = localStorage.getItem(`rejoin:${code}`) ?? undefined
 
     sendMessage({
       event: 'join_room',
       payload: {
         roomCode: code,
-        nickname,
-        rejoinToken
+        nickname: JOINER_NICKNAME
       }
     })
   }
 
-  const enterReadyPhase = () => {
+  const startGame = () => {
     if (!lobbyState.room) {
       return
     }
 
+    pendingHostActionRef.current = 'start_game'
     sendMessage({
       event: 'host_enter_ready_phase',
       payload: {
@@ -156,115 +244,168 @@ function App() {
     })
   }
 
-  const readyUp = () => {
-    if (!lobbyState.room || !lobbyState.selfPlayerId) {
+  const tapNow = () => {
+    if (!lobbyState.room || !lobbyState.selfPlayerId || !lobbyState.activeRound) {
       return
     }
 
     sendMessage({
-      event: 'player_ready_ok',
+      event: 'player_input',
       payload: {
         roomCode: lobbyState.room.roomCode,
-        playerId: lobbyState.selfPlayerId
+        playerId: lobbyState.selfPlayerId,
+        inputType: 'tap',
+        inputValue: 1,
+        tsClientMs: Date.now()
       }
     })
+    setLocalTapCount((value) => value + 1)
+  }
+
+  const roomCode = lobbyState.room?.roomCode
+  const playerCount = lobbyState.room?.players.length ?? 0
+  const joinUrl = roomCode
+    ? `${window.location.origin}${window.location.pathname}?roomCode=${roomCode}`
+    : ''
+
+  const qrCodeUrl = roomCode
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(joinUrl)}`
+    : ''
+  const countdownSeconds = lobbyState.activeRound
+    ? Math.max(0, Math.ceil((lobbyState.activeRound.startAt - clock) / 1000))
+    : null
+  const roundRemainingSeconds = lobbyState.activeRound
+    ? Math.max(0, Math.ceil((lobbyState.activeRound.endAt - clock) / 1000))
+    : null
+  const canTap =
+    !!lobbyState.activeRound &&
+    !!lobbyState.selfPlayerId &&
+    clock >= lobbyState.activeRound.startAt &&
+    clock <= lobbyState.activeRound.endAt
+
+  const copyQrCodeUrl = async () => {
+    if (!joinUrl) {
+      return
+    }
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(joinUrl)
+      } else {
+        const textArea = document.createElement('textarea')
+        textArea.value = joinUrl
+        textArea.style.position = 'fixed'
+        textArea.style.opacity = '0'
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+      }
+
+      setCopyMessage('QRCode 網址已複製')
+      setLocalError(null)
+    } catch {
+      setLocalError('無法複製 QRCode 網址')
+      setCopyMessage(null)
+    }
   }
 
   return (
     <main className="app-shell">
-      <header className="hero">
-        <h1>Party Pool MVP</h1>
-        <p>開房、加入、準備倒數、自動開局（TDD 版本）</p>
-        <p className={wsConnected ? 'ok' : 'warn'}>
-          WS: {wsConnected ? '已連線' : '未連線'} ({wsUrl})
-        </p>
-      </header>
+      <h1 className="title">Party Pool</h1>
 
-      <section className="panel">
-        <h2>Lobby 操作</h2>
-        <div className="row">
-          <label htmlFor="nickname">暱稱</label>
-          <input
-            id="nickname"
-            value={nickname}
-            onChange={(event) => setNickname(event.target.value)}
-            maxLength={20}
-            placeholder="輸入暱稱"
-          />
-        </div>
+      {!lobbyState.room ? (
+        <section className="landing-card">
+          <div className="landing-actions">
+            <button className="primary-btn" onClick={startRoom}>
+              開房間
+            </button>
+            <button className="ghost-btn" onClick={() => setJoinMode((value) => !value)}>
+              加入房間
+            </button>
+          </div>
 
-        <div className="row">
-          <label htmlFor="roomCode">房間碼</label>
-          <input
-            id="roomCode"
-            value={roomCodeInput}
-            onChange={(event) => setRoomCodeInput(event.target.value.toUpperCase())}
-            maxLength={6}
-            placeholder="ABCD"
-          />
-        </div>
-
-        <div className="actions">
-          <button onClick={startRoom}>開房間</button>
-          <button onClick={joinRoom}>加入房間</button>
-          <button onClick={enterReadyPhase} disabled={!lobbyState.room || !lobbyState.isHost}>
-            房主開始準備
-          </button>
-          <button
-            onClick={readyUp}
-            disabled={
-              !lobbyState.room ||
-              lobbyState.room.status !== 'readying' ||
-              !selfPlayer ||
-              selfPlayer.readyStatus === 'ok'
-            }
-          >
-            我已準備（OK）
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <h2>房間資訊</h2>
-        {!lobbyState.room ? (
-          <p>尚未加入房間</p>
-        ) : (
-          <>
-            <p>
-              房間碼：<strong>{lobbyState.room.roomCode}</strong>
-            </p>
-            <p>
-              狀態：<strong>{lobbyState.room.status}</strong>
-            </p>
-            <p>
-              人數：<strong>{lobbyState.room.players.length}</strong> / {lobbyState.room.maxPlayers}
-            </p>
-            {remainingReadySeconds !== null && (
-              <p>
-                準備倒數：<strong>{remainingReadySeconds}</strong> 秒
-              </p>
-            )}
-            {lobbyState.gameStartedAt && <p className="ok">回合已開始！</p>}
-
-            <ul className="player-list">
-              {lobbyState.room.players.map((player) => (
-                <li key={player.playerId}>
-                  <span>{player.nickname}</span>
-                  <span>{player.isConnected ? '連線中' : '斷線'}</span>
-                  <span>{player.readyStatus === 'ok' ? 'OK' : '未準備'}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
-
-      {(localError || lobbyState.error) && (
-        <section className="panel error">
-          <h2>錯誤訊息</h2>
-          <p>{localError ?? lobbyState.error}</p>
+          {joinMode && (
+            <div className="join-box">
+              <input
+                aria-label="加入房間碼"
+                value={roomCodeInput}
+                onChange={(event) => setRoomCodeInput(event.target.value.toUpperCase())}
+                maxLength={6}
+                placeholder="輸入房間碼"
+              />
+              <button className="primary-btn" onClick={joinRoom}>
+                確認加入
+              </button>
+            </div>
+          )}
         </section>
+      ) : (
+        <>
+          {lobbyState.activeRound && (
+            <section className="game-card">
+              <h2>Tap Challenge</h2>
+              {countdownSeconds !== null && countdownSeconds > 0 ? (
+                <p>倒數開始：{countdownSeconds} 秒</p>
+              ) : (
+                <p>剩餘時間：{roundRemainingSeconds ?? 0} 秒</p>
+              )}
+              <button className="tap-btn" onClick={tapNow} disabled={!canTap}>
+                連打！({localTapCount})
+              </button>
+            </section>
+          )}
+
+          {lobbyState.lastRoundResult && (
+            <section className="result-card">
+              <h2>回合結果（Round {lobbyState.lastRoundResult.roundNo}）</h2>
+              <ul>
+                {lobbyState.lastRoundResult.ranking.map((item) => (
+                  <li key={item.playerId}>
+                    {item.nickname}：{item.tapCount} 次（總分 {item.scoreAfter}）
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section className="room-card">
+            <div className="room-main">
+              <div className="room-code-box">
+                <p className="caption">房間碼</p>
+                <p className="room-code">{roomCode}</p>
+              </div>
+
+              <div className="qrcode-box">
+                <img src={qrCodeUrl} alt="加入房間 QRCode" width={220} height={220} />
+              </div>
+            </div>
+
+            <div className="room-footer">
+              <p>
+                目前加入人數 <strong>{playerCount} 人</strong>
+              </p>
+              <div className="room-actions">
+                <button className="primary-btn" onClick={startGame} disabled={!lobbyState.isHost}>
+                  開始遊戲
+                </button>
+                {isDevMode && (
+                  <button className="ghost-btn" onClick={copyQrCodeUrl}>
+                    複製QRCode網址
+                  </button>
+                )}
+              </div>
+            </div>
+            {copyMessage && <p className="copy-text">QRCode 網址已複製</p>}
+          </section>
+        </>
       )}
+
+      <p className={wsConnected ? 'ws ok' : 'ws warn'}>
+        連線狀態：{wsConnected ? '已連線' : '未連線'}
+      </p>
+
+      {(localError || lobbyState.error) && <p className="error-text">{localError ?? lobbyState.error}</p>}
     </main>
   )
 }

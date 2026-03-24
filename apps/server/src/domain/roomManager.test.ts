@@ -208,4 +208,143 @@ describe('RoomManager', () => {
     const player = snapshot?.players.find((item) => item.playerId === join.player.playerId)
     expect(player?.isConnected).toBe(false)
   })
+
+  it('counts tap input during running window only', () => {
+    let nowMs = 300_000
+    const manager = new RoomManager({
+      now: () => nowMs,
+      codeGenerator: () => 'TAP1'
+    })
+
+    const created = manager.createRoom({
+      hostSocketId: 'host-socket',
+      hostNickname: 'Host',
+      maxPlayers: 8
+    })
+
+    const join = manager.joinRoom({
+      roomCode: 'TAP1',
+      socketId: 'p2-socket',
+      nickname: 'P2'
+    })
+    expect(join.ok).toBe(true)
+    if (!join.ok) {
+      return
+    }
+
+    manager.enterReadyPhase({
+      roomCode: 'TAP1',
+      requesterSocketId: 'host-socket'
+    })
+    manager.markPlayerReady({
+      roomCode: 'TAP1',
+      playerId: created.hostPlayerId
+    })
+    manager.markPlayerReady({
+      roomCode: 'TAP1',
+      playerId: join.player.playerId
+    })
+
+    const roundStart = manager.startTapRound({ roomCode: 'TAP1' })
+    expect(roundStart.ok).toBe(true)
+    if (!roundStart.ok) {
+      return
+    }
+
+    const beforeStart = manager.submitTapInput({
+      roomCode: 'TAP1',
+      playerId: created.hostPlayerId,
+      inputValue: 1
+    })
+    expect(beforeStart.ok).toBe(true)
+    if (beforeStart.ok) {
+      expect(beforeStart.accepted).toBe(false)
+    }
+
+    nowMs = roundStart.round.startAt + 20
+    const duringRound = manager.submitTapInput({
+      roomCode: 'TAP1',
+      playerId: created.hostPlayerId,
+      inputValue: 1
+    })
+    expect(duringRound.ok).toBe(true)
+    if (duringRound.ok) {
+      expect(duringRound.accepted).toBe(true)
+      expect(duringRound.tapCount).toBe(1)
+    }
+  })
+
+  it('finishes tap round and grants +1 to winners', () => {
+    let nowMs = 400_000
+    const manager = new RoomManager({
+      now: () => nowMs,
+      codeGenerator: () => 'TAP2'
+    })
+
+    const created = manager.createRoom({
+      hostSocketId: 'host-socket',
+      hostNickname: 'Host',
+      maxPlayers: 8
+    })
+
+    const join = manager.joinRoom({
+      roomCode: 'TAP2',
+      socketId: 'p2-socket',
+      nickname: 'P2'
+    })
+    expect(join.ok).toBe(true)
+    if (!join.ok) {
+      return
+    }
+
+    manager.enterReadyPhase({
+      roomCode: 'TAP2',
+      requesterSocketId: 'host-socket'
+    })
+    manager.markPlayerReady({
+      roomCode: 'TAP2',
+      playerId: created.hostPlayerId
+    })
+    manager.markPlayerReady({
+      roomCode: 'TAP2',
+      playerId: join.player.playerId
+    })
+
+    const start = manager.startTapRound({ roomCode: 'TAP2' })
+    expect(start.ok).toBe(true)
+    if (!start.ok) {
+      return
+    }
+
+    nowMs = start.round.startAt + 10
+    manager.submitTapInput({
+      roomCode: 'TAP2',
+      playerId: created.hostPlayerId,
+      inputValue: 1
+    })
+    manager.submitTapInput({
+      roomCode: 'TAP2',
+      playerId: created.hostPlayerId,
+      inputValue: 1
+    })
+    manager.submitTapInput({
+      roomCode: 'TAP2',
+      playerId: join.player.playerId,
+      inputValue: 1
+    })
+
+    nowMs = start.round.endAt + 1
+    const events = manager.tickTapRounds()
+    expect(events).toHaveLength(1)
+    expect(events[0].roomCode).toBe('TAP2')
+    expect(events[0].winners).toEqual([created.hostPlayerId])
+
+    const host = events[0].ranking.find((item) => item.playerId === created.hostPlayerId)
+    const p2 = events[0].ranking.find((item) => item.playerId === join.player.playerId)
+
+    expect(host?.tapCount).toBe(2)
+    expect(host?.scoreAfter).toBe(1)
+    expect(p2?.tapCount).toBe(1)
+    expect(p2?.scoreAfter).toBe(0)
+  })
 })

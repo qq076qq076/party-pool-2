@@ -79,6 +79,14 @@ export interface PlayerReadyPayload {
   playerId: string
 }
 
+export interface PlayerInputPayload {
+  roomCode: string
+  playerId: string
+  inputType: 'tap'
+  inputValue: number
+  tsClientMs: number
+}
+
 export interface RequestRejoinPayload {
   roomCode: string
   rejoinToken: string
@@ -90,6 +98,7 @@ export type ClientMessage =
   | Envelope<'join_room', JoinRoomPayload>
   | Envelope<'host_enter_ready_phase', HostEnterReadyPhasePayload>
   | Envelope<'player_ready_ok', PlayerReadyPayload>
+  | Envelope<'player_input', PlayerInputPayload>
   | Envelope<'request_rejoin', RequestRejoinPayload>
   | Envelope<'heartbeat', { roomCode: string }>
 
@@ -101,9 +110,44 @@ export interface ErrorPayload {
 
 export type ServerMessage =
   | Envelope<'room_created', { room: RoomSnapshot; playerId: string; rejoinToken: string }>
-  | Envelope<'room_joined', { room: RoomSnapshot; playerId: string; rejoinToken: string; rejoined: boolean }>
+  | Envelope<
+      'room_joined',
+      {
+        room: RoomSnapshot
+        playerId: string
+        rejoinToken: string
+        rejoined: boolean
+        isHost: boolean
+      }
+    >
   | Envelope<'room_state_updated', { room: RoomSnapshot }>
   | Envelope<'ready_timer_started', { roomCode: string; roundNo: number; readyDeadlineAt: number }>
   | Envelope<'ready_status_updated', { roomCode: string; players: PlayerSnapshot[] }>
   | Envelope<'game_started', { roomCode: string; roundNo: number; startedAt: number }>
+  | Envelope<
+      'round_started',
+      {
+        roomCode: string
+        roundNo: number
+        countdownSec: number
+        durationSec: number
+        startAt: number
+        endAt: number
+      }
+    >
+  | Envelope<
+      'round_result',
+      {
+        roomCode: string
+        roundNo: number
+        winners: string[]
+        ranking: Array<{
+          playerId: string
+          nickname: string
+          tapCount: number
+          scoreAfter: number
+        }>
+        scoreboard: PlayerSnapshot[]
+      }
+    >
   | Envelope<'error', ErrorPayload>

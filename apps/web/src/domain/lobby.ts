@@ -9,6 +9,25 @@ export interface LobbyState {
   isHost: boolean
   readyDeadlineAt: number | null
   gameStartedAt: number | null
+  activeRound: {
+    roomCode: string
+    roundNo: number
+    countdownSec: number
+    durationSec: number
+    startAt: number
+    endAt: number
+  } | null
+  lastRoundResult: {
+    roomCode: string
+    roundNo: number
+    winners: string[]
+    ranking: Array<{
+      playerId: string
+      nickname: string
+      tapCount: number
+      scoreAfter: number
+    }>
+  } | null
   error: string | null
 }
 
@@ -19,6 +38,8 @@ export const initialLobbyState: LobbyState = {
   isHost: false,
   readyDeadlineAt: null,
   gameStartedAt: null,
+  activeRound: null,
+  lastRoundResult: null,
   error: null
 }
 
@@ -42,7 +63,7 @@ export const applyServerMessage = (
         room: message.payload.room,
         selfPlayerId: message.payload.playerId,
         rejoinToken: message.payload.rejoinToken,
-        isHost: false,
+        isHost: message.payload.isHost,
         error: null
       }
     case 'room_state_updated':
@@ -60,6 +81,30 @@ export const applyServerMessage = (
         ...state,
         gameStartedAt: message.payload.startedAt,
         readyDeadlineAt: null
+      }
+    case 'round_started':
+      return {
+        ...state,
+        activeRound: {
+          roomCode: message.payload.roomCode,
+          roundNo: message.payload.roundNo,
+          countdownSec: message.payload.countdownSec,
+          durationSec: message.payload.durationSec,
+          startAt: message.payload.startAt,
+          endAt: message.payload.endAt
+        },
+        lastRoundResult: null
+      }
+    case 'round_result':
+      return {
+        ...state,
+        activeRound: null,
+        lastRoundResult: {
+          roomCode: message.payload.roomCode,
+          roundNo: message.payload.roundNo,
+          winners: message.payload.winners,
+          ranking: message.payload.ranking
+        }
       }
     case 'error':
       return {

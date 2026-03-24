@@ -68,6 +68,20 @@ const emitRoomState = (room: RoomSnapshot): void => {
   }
 }
 
+const broadcastToRoom = (room: RoomSnapshot, message: ServerMessage): void => {
+  for (const player of room.players) {
+    const socketId = playerToSocket.get(player.playerId)
+    if (!socketId) {
+      continue
+    }
+    const socket = socketsById.get(socketId)
+    if (!socket || socket.readyState !== socket.OPEN) {
+      continue
+    }
+    send(socket, message)
+  }
+}
+
 const emitRoomStateByCode = (roomCode: string): void => {
   const room = roomManager.getRoomByCode(roomCode)
   if (!room) {
@@ -165,7 +179,8 @@ wss.on('connection', (socket) => {
           room: joined.room,
           playerId: joined.player.playerId,
           rejoinToken: joined.rejoinToken,
-          rejoined: joined.rejoined
+          rejoined: joined.rejoined,
+          isHost: joined.player.playerId === joined.room.players[0]?.playerId
         }
       })
 
@@ -273,9 +288,40 @@ wss.on('connection', (socket) => {
 
           send(targetSocket, gameStartedMessage)
         }
+
+        const startedRound = roomManager.startTapRound({ roomCode: room.roomCode })
+        if (startedRound.ok) {
+          const roundStartedMessage: ServerMessage = {
+            event: 'round_started',
+            requestId: parsed.requestId,
+            sentAt: Date.now(),
+            payload: {
+              roomCode: startedRound.round.roomCode,
+              roundNo: startedRound.round.roundNo,
+              countdownSec: startedRound.round.countdownSec,
+              durationSec: startedRound.round.durationSec,
+              startAt: startedRound.round.startAt,
+              endAt: startedRound.round.endAt
+            }
+          }
+          broadcastToRoom(room, roundStartedMessage)
+        }
       }
 
       emitRoomState(room)
+      return
+    }
+
+    if (parsed.event === 'player_input') {
+      const submitted = roomManager.submitTapInput({
+        roomCode: parsed.payload.roomCode,
+        playerId: parsed.payload.playerId,
+        inputValue: parsed.payload.inputValue
+      })
+
+      if (!submitted.ok) {
+        emitError(socket, submitted.code, parsed.requestId, 'Cannot accept player input')
+      }
       return
     }
   })
@@ -323,6 +369,46 @@ setInterval(() => {
       send(socket, startedMessage)
     }
 
+    const startedRound = roomManager.startTapRound({ roomCode: room.roomCode })
+    if (startedRound.ok) {
+      const roundStartedMessage: ServerMessage = {
+        event: 'round_started',
+        sentAt: Date.now(),
+        payload: {
+          roomCode: startedRound.round.roomCode,
+          roundNo: startedRound.round.roundNo,
+          countdownSec: startedRound.round.countdownSec,
+          durationSec: startedRound.round.durationSec,
+          startAt: startedRound.round.startAt,
+          endAt: startedRound.round.endAt
+        }
+      }
+      broadcastToRoom(room, roundStartedMessage)
+    }
+
+    emitRoomState(room)
+  }
+
+  const finishedRounds = roomManager.tickTapRounds()
+  for (const finished of finishedRounds) {
+    const room = roomManager.getRoomByCode(finished.roomCode)
+    if (!room) {
+      continue
+    }
+
+    const roundResultMessage: ServerMessage = {
+      event: 'round_result',
+      sentAt: Date.now(),
+      payload: {
+        roomCode: finished.roomCode,
+        roundNo: finished.roundNo,
+        winners: finished.winners,
+        ranking: finished.ranking,
+        scoreboard: finished.scoreboard
+      }
+    }
+
+    broadcastToRoom(room, roundResultMessage)
     emitRoomState(room)
   }
 }, READY_TIMER_POLL_MS)

@@ -9,6 +9,8 @@ import {
 } from '@party-pool/shared'
 
 const READY_TIMEOUT_MS = 60_000
+const TAP_COUNTDOWN_MS = 3_000
+const TAP_ROUND_DURATION_MS = 20_000
 
 interface PlayerRecord extends PlayerSnapshot {
   socketId: string
@@ -25,6 +27,14 @@ interface RoomRecord {
   readyDeadlineAt: number | null
   roundNo: number
   createdAt: number
+}
+
+interface ActiveTapRound {
+  roomCode: string
+  roundNo: number
+  startAt: number
+  endAt: number
+  taps: Map<string, number>
 }
 
 interface RoomManagerOptions {
@@ -53,6 +63,16 @@ interface EnterReadyInput {
 interface MarkReadyInput {
   roomCode: string
   playerId: string
+}
+
+interface StartTapRoundInput {
+  roomCode: string
+}
+
+interface SubmitTapInput {
+  roomCode: string
+  playerId: string
+  inputValue: number
 }
 
 type ErrorResult = {
@@ -92,8 +112,48 @@ interface CreateRoomResult {
   rejoinToken: string
 }
 
+export interface TapRoundWindow {
+  roomCode: string
+  roundNo: number
+  countdownSec: number
+  durationSec: number
+  startAt: number
+  endAt: number
+}
+
+export interface TapRoundRankItem {
+  playerId: string
+  nickname: string
+  tapCount: number
+  scoreAfter: number
+}
+
+export interface TapRoundFinishedEvent {
+  roomCode: string
+  roundNo: number
+  winners: string[]
+  ranking: TapRoundRankItem[]
+  scoreboard: PlayerSnapshot[]
+}
+
+type StartTapRoundResult =
+  | {
+      ok: true
+      round: TapRoundWindow
+    }
+  | ErrorResult
+
+type SubmitTapInputResult =
+  | {
+      ok: true
+      accepted: boolean
+      tapCount: number
+    }
+  | ErrorResult
+
 export class RoomManager {
   private readonly rooms = new Map<string, RoomRecord>()
+  private readonly activeTapRounds = new Map<string, ActiveTapRound>()
   private readonly now: () => number
   private readonly codeGenerator: () => string
 
@@ -288,6 +348,151 @@ export class RoomManager {
     }
 
     return startedRooms
+  }
+
+  startTapRound(input: StartTapRoundInput): StartTapRoundResult {
+    const room = this.getRoomRecord(input.roomCode)
+    if (!room) {
+      return this.error('ROOM_NOT_FOUND')
+    }
+
+    if (room.status !== 'playing') {
+      return this.error('ROUND_NOT_READY')
+    }
+
+    if (this.activeTapRounds.has(room.roomCode)) {
+      return this.error('ROUND_NOT_READY')
+    }
+
+    const now = this.now()
+    const startAt = now + TAP_COUNTDOWN_MS
+    const endAt = startAt + TAP_ROUND_DURATION_MS
+    const taps = new Map<string, number>()
+
+    for (const player of room.players) {
+      taps.set(player.playerId, 0)
+    }
+
+    this.activeTapRounds.set(room.roomCode, {
+      roomCode: room.roomCode,
+      roundNo: room.roundNo,
+      startAt,
+      endAt,
+      taps
+    })
+
+    return {
+      ok: true,
+      round: {
+        roomCode: room.roomCode,
+        roundNo: room.roundNo,
+        countdownSec: TAP_COUNTDOWN_MS / 1000,
+        durationSec: TAP_ROUND_DURATION_MS / 1000,
+        startAt,
+        endAt
+      }
+    }
+  }
+
+  submitTapInput(input: SubmitTapInput): SubmitTapInputResult {
+    const room = this.getRoomRecord(input.roomCode)
+    if (!room) {
+      return this.error('ROOM_NOT_FOUND')
+    }
+
+    const round = this.activeTapRounds.get(room.roomCode)
+    if (!round) {
+      return this.error('ROUND_NOT_READY')
+    }
+
+    const player = room.players.find((item) => item.playerId === input.playerId)
+    if (!player || !player.isConnected) {
+      return {
+        ok: true,
+        accepted: false,
+        tapCount: round.taps.get(input.playerId) ?? 0
+      }
+    }
+
+    const now = this.now()
+    if (now < round.startAt || now > round.endAt) {
+      return {
+        ok: true,
+        accepted: false,
+        tapCount: round.taps.get(player.playerId) ?? 0
+      }
+    }
+
+    const add = Math.max(1, Math.floor(input.inputValue))
+    const current = round.taps.get(player.playerId) ?? 0
+    const next = current + add
+    round.taps.set(player.playerId, next)
+
+    return {
+      ok: true,
+      accepted: true,
+      tapCount: next
+    }
+  }
+
+  tickTapRounds(): TapRoundFinishedEvent[] {
+    const now = this.now()
+    const finished: TapRoundFinishedEvent[] = []
+
+    for (const round of this.activeTapRounds.values()) {
+      if (now < round.endAt) {
+        continue
+      }
+
+      const room = this.getRoomRecord(round.roomCode)
+      if (!room) {
+        this.activeTapRounds.delete(round.roomCode)
+        continue
+      }
+
+      const ranking = room.players
+        .map((player) => ({
+          player,
+          tapCount: round.taps.get(player.playerId) ?? 0
+        }))
+        .sort((a, b) => b.tapCount - a.tapCount)
+
+      const topScore = ranking[0]?.tapCount ?? 0
+      const winners = ranking
+        .filter((item) => item.tapCount === topScore)
+        .map((item) => item.player.playerId)
+
+      for (const winnerId of winners) {
+        const winner = room.players.find((player) => player.playerId === winnerId)
+        if (winner) {
+          winner.score += 1
+        }
+      }
+
+      room.status = 'waiting'
+      room.readyDeadlineAt = null
+      room.roundNo += 1
+      for (const player of room.players) {
+        player.readyStatus = 'pending'
+      }
+
+      finished.push({
+        roomCode: room.roomCode,
+        roundNo: round.roundNo,
+        winners,
+        ranking: ranking.map((item) => ({
+          playerId: item.player.playerId,
+          nickname: item.player.nickname,
+          tapCount: item.tapCount,
+          scoreAfter: item.player.score
+        })),
+        scoreboard: this.toRoomSnapshot(room).players
+      })
+
+      this.activeTapRounds.delete(room.roomCode)
+    }
+
+    return finished
   }
 
   disconnectSocket(socketId: string): string[] {

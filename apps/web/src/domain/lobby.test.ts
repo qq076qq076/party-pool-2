@@ -52,4 +52,41 @@ describe('lobby state reducer', () => {
 
     expect(next.error).toBe('Join room failed')
   })
+
+  it('stores active tap round when round starts', () => {
+    const next = applyServerMessage(initialLobbyState, {
+      event: 'round_started',
+      payload: {
+        roomCode: 'ABCD',
+        roundNo: 1,
+        countdownSec: 3,
+        durationSec: 20,
+        startAt: 10_000,
+        endAt: 30_000
+      }
+    })
+
+    expect(next.activeRound?.roomCode).toBe('ABCD')
+    expect(next.activeRound?.countdownSec).toBe(3)
+    expect(next.activeRound?.durationSec).toBe(20)
+  })
+
+  it('stores last round result when round ends', () => {
+    const next = applyServerMessage(initialLobbyState, {
+      event: 'round_result',
+      payload: {
+        roomCode: 'ABCD',
+        roundNo: 1,
+        winners: ['p1'],
+        ranking: [
+          { playerId: 'p1', nickname: 'P1', tapCount: 10, scoreAfter: 1 },
+          { playerId: 'p2', nickname: 'P2', tapCount: 6, scoreAfter: 0 }
+        ],
+        scoreboard: []
+      }
+    })
+
+    expect(next.lastRoundResult?.winners).toEqual(['p1'])
+    expect(next.lastRoundResult?.ranking[0].tapCount).toBe(10)
+  })
 })
