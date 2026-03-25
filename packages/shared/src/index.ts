@@ -87,6 +87,11 @@ export interface PlayerInputPayload {
   tsClientMs: number
 }
 
+export interface RoundProgressItem {
+  playerId: string
+  tapCount: number
+}
+
 export interface RequestRejoinPayload {
   roomCode: string
   rejoinToken: string
@@ -133,6 +138,14 @@ export type ServerMessage =
         durationSec: number
         startAt: number
         endAt: number
+      }
+    >
+  | Envelope<
+      'round_progress',
+      {
+        roomCode: string
+        roundNo: number
+        progress: RoundProgressItem[]
       }
     >
   | Envelope<

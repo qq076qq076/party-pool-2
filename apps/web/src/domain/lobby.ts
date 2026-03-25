@@ -28,6 +28,7 @@ export interface LobbyState {
       scoreAfter: number
     }>
   } | null
+  roundProgress: Record<string, number>
   error: string | null
 }
 
@@ -40,6 +41,7 @@ export const initialLobbyState: LobbyState = {
   gameStartedAt: null,
   activeRound: null,
   lastRoundResult: null,
+  roundProgress: {},
   error: null
 }
 
@@ -55,6 +57,7 @@ export const applyServerMessage = (
         selfPlayerId: message.payload.playerId,
         rejoinToken: message.payload.rejoinToken,
         isHost: true,
+        roundProgress: {},
         error: null
       }
     case 'room_joined':
@@ -64,6 +67,7 @@ export const applyServerMessage = (
         selfPlayerId: message.payload.playerId,
         rejoinToken: message.payload.rejoinToken,
         isHost: message.payload.isHost,
+        roundProgress: {},
         error: null
       }
     case 'room_state_updated':
@@ -93,12 +97,26 @@ export const applyServerMessage = (
           startAt: message.payload.startAt,
           endAt: message.payload.endAt
         },
+        roundProgress:
+          state.room?.players.reduce<Record<string, number>>((accumulator, player) => {
+            accumulator[player.playerId] = 0
+            return accumulator
+          }, {}) ?? {},
         lastRoundResult: null
+      }
+    case 'round_progress':
+      return {
+        ...state,
+        roundProgress: message.payload.progress.reduce<Record<string, number>>((accumulator, item) => {
+          accumulator[item.playerId] = item.tapCount
+          return accumulator
+        }, {})
       }
     case 'round_result':
       return {
         ...state,
         activeRound: null,
+        roundProgress: {},
         lastRoundResult: {
           roomCode: message.payload.roomCode,
           roundNo: message.payload.roundNo,

@@ -218,7 +218,7 @@ describe('App host UI', () => {
     })
   })
 
-  it('sends player_input when tap button is clicked during active round', async () => {
+  it('renders display-only game scene for host during active round', async () => {
     render(<App />)
 
     await waitFor(() => {
@@ -258,6 +258,31 @@ describe('App host UI', () => {
         rejoinToken: 'token-1'
       }
     })
+    ws.emitMessage({
+      event: 'room_state_updated',
+      payload: {
+        room: {
+          roomId: 'room-1',
+          roomCode: 'ABCD',
+          status: 'playing',
+          maxPlayers: 8,
+          players: [
+            {
+              playerId: 'host-1',
+              nickname: 'Host',
+              isConnected: true,
+              readyStatus: 'ok',
+              score: 0,
+              sensorStatus: 'unknown',
+              lastSeenAt: Date.now()
+            }
+          ],
+          readyDeadlineAt: null,
+          roundNo: 1,
+          createdAt: Date.now()
+        }
+      }
+    })
 
     ws.emitMessage({
       event: 'round_started',
@@ -271,12 +296,83 @@ describe('App host UI', () => {
       }
     })
 
-    const tapButton = await screen.findByRole('button', { name: /連打！/ })
+    expect(await screen.findByTestId('stair-climb-display')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Party Pool' })).not.toBeInTheDocument()
+    expect(screen.queryByText('房間碼')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '開始遊戲' })).not.toBeInTheDocument()
+  })
+
+  it('sends player_input from controller-only button during active round', async () => {
+    render(<App />)
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1)
+    })
+    await waitFor(() => {
+      expect(screen.getByText('連線狀態：已連線')).toBeInTheDocument()
+    })
+
+    const ws = MockWebSocket.instances[0]
+    ws.emitMessage({
+      event: 'room_joined',
+      payload: {
+        room: {
+          roomId: 'room-1',
+          roomCode: 'ABCD',
+          status: 'playing',
+          maxPlayers: 8,
+          players: [
+            {
+              playerId: 'host-1',
+              nickname: 'Host',
+              isConnected: true,
+              readyStatus: 'ok',
+              score: 0,
+              sensorStatus: 'unknown',
+              lastSeenAt: Date.now()
+            },
+            {
+              playerId: 'player-2',
+              nickname: 'P2',
+              isConnected: true,
+              readyStatus: 'ok',
+              score: 0,
+              sensorStatus: 'unknown',
+              lastSeenAt: Date.now()
+            }
+          ],
+          readyDeadlineAt: null,
+          roundNo: 1,
+          createdAt: Date.now()
+        },
+        playerId: 'player-2',
+        rejoinToken: 'token-2',
+        rejoined: false,
+        isHost: false
+      }
+    })
+    ws.emitMessage({
+      event: 'round_started',
+      payload: {
+        roomCode: 'ABCD',
+        roundNo: 1,
+        countdownSec: 3,
+        durationSec: 20,
+        startAt: Date.now() - 100,
+        endAt: Date.now() + 20_000
+      }
+    })
+
+    expect(await screen.findByTestId('controller-button-block')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Party Pool' })).not.toBeInTheDocument()
+    expect(screen.queryByText('房間碼')).not.toBeInTheDocument()
+
+    const tapButton = screen.getByRole('button', { name: '踏上階梯' })
     fireEvent.click(tapButton)
 
     const lastSent = ws.sent.at(-1) ?? ''
     expect(lastSent).toContain('player_input')
-    expect(lastSent).toContain('host-1')
+    expect(lastSent).toContain('player-2')
   })
 
   it('does not include rejoin token in manual join_room action', async () => {
@@ -433,7 +529,7 @@ describe('App host UI', () => {
       }
     })
 
-    expect(await screen.findByRole('button', { name: /連打！/ })).toBeInTheDocument()
+    expect(await screen.findByTestId('stair-climb-display')).toBeInTheDocument()
   })
 
   it('retries start game after rejoin when server returns NOT_ROOM_HOST', async () => {

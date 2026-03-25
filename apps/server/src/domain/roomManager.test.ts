@@ -271,6 +271,10 @@ describe('RoomManager', () => {
     if (duringRound.ok) {
       expect(duringRound.accepted).toBe(true)
       expect(duringRound.tapCount).toBe(1)
+      expect(duringRound.progress).toEqual([
+        { playerId: created.hostPlayerId, tapCount: 1 },
+        { playerId: join.player.playerId, tapCount: 0 }
+      ])
     }
   })
 

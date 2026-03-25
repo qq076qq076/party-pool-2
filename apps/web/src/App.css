@@ -6,6 +6,69 @@
   justify-items: center;
 }
 
+.display-mode-shell,
+.controller-mode-shell {
+  min-height: 100vh;
+}
+
+.display-mode-shell {
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(255, 228, 170, 0.6), transparent 30%),
+    linear-gradient(180deg, #f8efd8 0%, #f1dfbf 100%);
+}
+
+.stair-climb-display {
+  width: 100vw;
+  height: 100vh;
+}
+
+.stair-climb-display canvas {
+  display: block;
+}
+
+.controller-mode-shell {
+  display: grid;
+  place-items: stretch;
+  padding: 20px;
+  background:
+    radial-gradient(circle at top, rgba(255, 214, 170, 0.38), transparent 36%),
+    linear-gradient(180deg, #231a14 0%, #3a2b20 100%);
+}
+
+.controller-button-block {
+  min-height: calc(100vh - 40px);
+  display: grid;
+  place-items: stretch;
+}
+
+.controller-tap-btn {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, #ffd07c 0%, #f29d38 100%);
+  color: #2b1d12;
+  font-family: 'Lexend', 'Noto Sans TC', sans-serif;
+  font-size: clamp(34px, 9vw, 72px);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 255, 255, 0.25),
+    0 24px 48px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+}
+
+.controller-tap-btn:disabled {
+  background: linear-gradient(180deg, #8d7e70 0%, #64584f 100%);
+  color: rgba(255, 244, 229, 0.72);
+  cursor: not-allowed;
+  box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.08);
+}
+
 .title {
   font-size: clamp(44px, 8vw, 88px);
   line-height: 1;
@@ -23,7 +86,6 @@
   box-shadow: 0 14px 40px rgba(53, 34, 10, 0.08);
 }
 
-.game-card,
 .result-card {
   width: min(860px, 100%);
   background: #fff;
@@ -32,27 +94,8 @@
   padding: 16px;
 }
 
-.game-card h2,
 .result-card h2 {
   margin: 0 0 8px;
-}
-
-.tap-btn {
-  margin-top: 12px;
-  width: 100%;
-  border: 0;
-  border-radius: 12px;
-  background: #1f8a70;
-  color: #fff;
-  font-size: 28px;
-  font-weight: 700;
-  padding: 16px;
-  cursor: pointer;
-}
-
-.tap-btn:disabled {
-  background: #8ba8a0;
-  cursor: not-allowed;
 }
 
 .result-card ul {
@@ -169,6 +212,52 @@
   font-weight: 600;
 }
 
+.controller-wait-card {
+  width: min(680px, 100%);
+  padding: 28px;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 251, 242, 0.96) 0%, rgba(255, 243, 223, 0.96) 100%);
+  border: 1px solid rgba(231, 216, 199, 0.9);
+  box-shadow: 0 24px 56px rgba(70, 41, 14, 0.12);
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+}
+
+.controller-wait-label {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.controller-wait-code {
+  font-family: 'Lexend', 'Noto Sans TC', sans-serif;
+  font-size: clamp(48px, 12vw, 88px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #241a13;
+}
+
+.controller-wait-status {
+  font-size: 20px;
+  color: #574a3d;
+}
+
+.controller-player-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.controller-player-chip {
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: #f3e9d9;
+  color: #594c40;
+  font-weight: 700;
+}
+
 .ws {
   margin: 0;
   font-size: 14px;
@@ -215,5 +304,17 @@
   .join-box {
     flex-direction: column;
     align-items: center;
+  }
+
+  .controller-mode-shell {
+    padding: 14px;
+  }
+
+  .controller-button-block {
+    min-height: calc(100vh - 28px);
+  }
+
+  .controller-tap-btn {
+    border-radius: 22px;
   }
 }

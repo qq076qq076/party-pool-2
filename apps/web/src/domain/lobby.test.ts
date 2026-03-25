@@ -71,6 +71,72 @@ describe('lobby state reducer', () => {
     expect(next.activeRound?.durationSec).toBe(20)
   })
 
+  it('tracks live round progress updates for stair climbing display', () => {
+    const withRoom = applyServerMessage(initialLobbyState, {
+      event: 'room_joined',
+      payload: {
+        room: {
+          roomId: 'r1',
+          roomCode: 'ABCD',
+          status: 'playing',
+          maxPlayers: 8,
+          players: [
+            {
+              playerId: 'p1',
+              nickname: 'P1',
+              isConnected: true,
+              readyStatus: 'ok',
+              score: 0,
+              sensorStatus: 'unknown',
+              lastSeenAt: 1000
+            },
+            {
+              playerId: 'p2',
+              nickname: 'P2',
+              isConnected: true,
+              readyStatus: 'ok',
+              score: 0,
+              sensorStatus: 'unknown',
+              lastSeenAt: 1000
+            }
+          ],
+          readyDeadlineAt: null,
+          roundNo: 1,
+          createdAt: 1000
+        },
+        playerId: 'p2',
+        rejoinToken: 'token-2',
+        rejoined: false,
+        isHost: false
+      }
+    })
+    const active = applyServerMessage(withRoom, {
+      event: 'round_started',
+      payload: {
+        roomCode: 'ABCD',
+        roundNo: 1,
+        countdownSec: 3,
+        durationSec: 20,
+        startAt: 10_000,
+        endAt: 30_000
+      }
+    })
+    const next = applyServerMessage(active, {
+      event: 'round_progress',
+      payload: {
+        roomCode: 'ABCD',
+        roundNo: 1,
+        progress: [
+          { playerId: 'p1', tapCount: 2 },
+          { playerId: 'p2', tapCount: 5 }
+        ]
+      }
+    })
+
+    expect(next.roundProgress.p1).toBe(2)
+    expect(next.roundProgress.p2).toBe(5)
+  })
+
   it('stores last round result when round ends', () => {
     const next = applyServerMessage(initialLobbyState, {
       event: 'round_result',

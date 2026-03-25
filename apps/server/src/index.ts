@@ -321,6 +321,25 @@ wss.on('connection', (socket) => {
 
       if (!submitted.ok) {
         emitError(socket, submitted.code, parsed.requestId, 'Cannot accept player input')
+        return
+      }
+
+      if (submitted.accepted) {
+        const room = roomManager.getRoomByCode(parsed.payload.roomCode)
+        if (room) {
+          const progressMessage: ServerMessage = {
+            event: 'round_progress',
+            requestId: parsed.requestId,
+            sentAt: Date.now(),
+            payload: {
+              roomCode: room.roomCode,
+              roundNo: room.roundNo,
+              progress: submitted.progress
+            }
+          }
+
+          broadcastToRoom(room, progressMessage)
+        }
       }
       return
     }

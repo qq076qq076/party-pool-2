@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClientMessage, ServerMessage } from '@party-pool/shared'
 
 import { applyServerMessage, initialLobbyState } from './domain/lobby'
+import { StairClimbDisplay } from './game/StairClimbDisplay'
 import './App.css'
 
 const DEFAULT_WS_URL = 'ws://localhost:8787'
@@ -27,7 +28,6 @@ function App() {
   const [localError, setLocalError] = useState<string | null>(null)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(Date.now())
-  const [localTapCount, setLocalTapCount] = useState(0)
 
   const wsUrl = useMemo(() => getWsUrl(), [])
   const isDevMode = import.meta.env.DEV || import.meta.env.MODE === 'test'
@@ -148,7 +148,6 @@ function App() {
       return
     }
 
-    setLocalTapCount(0)
     const timer = setInterval(() => {
       setClock(Date.now())
     }, 100)
@@ -259,11 +258,15 @@ function App() {
         tsClientMs: Date.now()
       }
     })
-    setLocalTapCount((value) => value + 1)
   }
 
   const roomCode = lobbyState.room?.roomCode
   const playerCount = lobbyState.room?.players.length ?? 0
+  const scenePlayers =
+    lobbyState.room?.players.map((player) => ({
+      playerId: player.playerId,
+      nickname: player.nickname
+    })) ?? []
   const joinUrl = roomCode
     ? `${window.location.origin}${window.location.pathname}?roomCode=${roomCode}`
     : ''
@@ -282,6 +285,8 @@ function App() {
     !!lobbyState.selfPlayerId &&
     clock >= lobbyState.activeRound.startAt &&
     clock <= lobbyState.activeRound.endAt
+  const isHostDisplayInRound = !!lobbyState.activeRound && lobbyState.isHost
+  const isControllerInRound = !!lobbyState.activeRound && !!lobbyState.room && !lobbyState.isHost
 
   const copyQrCodeUrl = async () => {
     if (!joinUrl) {
@@ -308,6 +313,31 @@ function App() {
       setLocalError('無法複製 QRCode 網址')
       setCopyMessage(null)
     }
+  }
+
+  if (isHostDisplayInRound && lobbyState.activeRound) {
+    return (
+      <main className="display-mode-shell">
+        <StairClimbDisplay
+          players={scenePlayers}
+          progress={lobbyState.roundProgress}
+          countdownSeconds={countdownSeconds}
+          remainingSeconds={roundRemainingSeconds}
+        />
+      </main>
+    )
+  }
+
+  if (isControllerInRound) {
+    return (
+      <main className="controller-mode-shell">
+        <section className="controller-button-block" data-testid="controller-button-block">
+          <button className="controller-tap-btn" onClick={tapNow} disabled={!canTap}>
+            踏上階梯
+          </button>
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -342,20 +372,6 @@ function App() {
         </section>
       ) : (
         <>
-          {lobbyState.activeRound && (
-            <section className="game-card">
-              <h2>Tap Challenge</h2>
-              {countdownSeconds !== null && countdownSeconds > 0 ? (
-                <p>倒數開始：{countdownSeconds} 秒</p>
-              ) : (
-                <p>剩餘時間：{roundRemainingSeconds ?? 0} 秒</p>
-              )}
-              <button className="tap-btn" onClick={tapNow} disabled={!canTap}>
-                連打！({localTapCount})
-              </button>
-            </section>
-          )}
-
           {lobbyState.lastRoundResult && (
             <section className="result-card">
               <h2>回合結果（Round {lobbyState.lastRoundResult.roundNo}）</h2>
@@ -369,35 +385,50 @@ function App() {
             </section>
           )}
 
-          <section className="room-card">
-            <div className="room-main">
-              <div className="room-code-box">
-                <p className="caption">房間碼</p>
-                <p className="room-code">{roomCode}</p>
+          {lobbyState.isHost ? (
+            <section className="room-card">
+              <div className="room-main">
+                <div className="room-code-box">
+                  <p className="caption">房間碼</p>
+                  <p className="room-code">{roomCode}</p>
+                </div>
+
+                <div className="qrcode-box">
+                  <img src={qrCodeUrl} alt="加入房間 QRCode" width={220} height={220} />
+                </div>
               </div>
 
-              <div className="qrcode-box">
-                <img src={qrCodeUrl} alt="加入房間 QRCode" width={220} height={220} />
-              </div>
-            </div>
-
-            <div className="room-footer">
-              <p>
-                目前加入人數 <strong>{playerCount} 人</strong>
-              </p>
-              <div className="room-actions">
-                <button className="primary-btn" onClick={startGame} disabled={!lobbyState.isHost}>
-                  開始遊戲
-                </button>
-                {isDevMode && (
-                  <button className="ghost-btn" onClick={copyQrCodeUrl}>
-                    複製QRCode網址
+              <div className="room-footer">
+                <p>
+                  目前加入人數 <strong>{playerCount} 人</strong>
+                </p>
+                <div className="room-actions">
+                  <button className="primary-btn" onClick={startGame} disabled={!lobbyState.isHost}>
+                    開始遊戲
                   </button>
-                )}
+                  {isDevMode && (
+                    <button className="ghost-btn" onClick={copyQrCodeUrl}>
+                      複製QRCode網址
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-            {copyMessage && <p className="copy-text">QRCode 網址已複製</p>}
-          </section>
+              {copyMessage && <p className="copy-text">QRCode 網址已複製</p>}
+            </section>
+          ) : (
+            <section className="controller-wait-card">
+              <p className="controller-wait-label">已加入房間</p>
+              <p className="controller-wait-code">{roomCode}</p>
+              <p className="controller-wait-status">等待房主開始遊戲</p>
+              <div className="controller-player-list">
+                {scenePlayers.map((player) => (
+                  <span key={player.playerId} className="controller-player-chip">
+                    {player.nickname}
+                  </span>
+                ))}
+              </div>
+            </section>
+          )}
         </>
       )}
 

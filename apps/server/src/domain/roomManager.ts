@@ -128,6 +128,11 @@ export interface TapRoundRankItem {
   scoreAfter: number
 }
 
+export interface TapRoundProgressItem {
+  playerId: string
+  tapCount: number
+}
+
 export interface TapRoundFinishedEvent {
   roomCode: string
   roundNo: number
@@ -148,6 +153,7 @@ type SubmitTapInputResult =
       ok: true
       accepted: boolean
       tapCount: number
+      progress: TapRoundProgressItem[]
     }
   | ErrorResult
 
@@ -410,7 +416,8 @@ export class RoomManager {
       return {
         ok: true,
         accepted: false,
-        tapCount: round.taps.get(input.playerId) ?? 0
+        tapCount: round.taps.get(input.playerId) ?? 0,
+        progress: this.toTapRoundProgress(round)
       }
     }
 
@@ -419,7 +426,8 @@ export class RoomManager {
       return {
         ok: true,
         accepted: false,
-        tapCount: round.taps.get(player.playerId) ?? 0
+        tapCount: round.taps.get(player.playerId) ?? 0,
+        progress: this.toTapRoundProgress(round)
       }
     }
 
@@ -431,7 +439,8 @@ export class RoomManager {
     return {
       ok: true,
       accepted: true,
-      tapCount: next
+      tapCount: next,
+      progress: this.toTapRoundProgress(round)
     }
   }
 
@@ -571,5 +580,12 @@ export class RoomManager {
       return ''
     }
     return trimmed
+  }
+
+  private toTapRoundProgress(round: ActiveTapRound): TapRoundProgressItem[] {
+    return Array.from(round.taps.entries()).map(([playerId, tapCount]) => ({
+      playerId,
+      tapCount
+    }))
   }
 }
