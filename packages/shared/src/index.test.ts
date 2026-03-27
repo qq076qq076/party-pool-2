@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { isValidRoomCode, normalizeRoomCode } from './index'
+import {
+  DEFAULT_GAME_ID,
+  getSharedGameDefinition,
+  isValidRoomCode,
+  normalizeRoomCode
+} from './index'
 
 describe('room code helpers', () => {
   it('normalizes room code to uppercase', () => {
@@ -16,5 +21,10 @@ describe('room code helpers', () => {
     expect(isValidRoomCode('ABC')).toBe(false)
     expect(isValidRoomCode('AB-12')).toBe(false)
     expect(isValidRoomCode('AB12345')).toBe(false)
+  })
+
+  it('exposes the default game definition', () => {
+    expect(DEFAULT_GAME_ID).toBe('stair-climb')
+    expect(getSharedGameDefinition(DEFAULT_GAME_ID).title).toBe('Stair Climb')
   })
 })

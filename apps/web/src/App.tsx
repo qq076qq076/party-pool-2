@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-import type { ClientMessage, ServerMessage } from '@party-pool/shared'
+import { DEFAULT_GAME_ID, type ClientMessage, type ServerMessage } from '@party-pool/shared'
 
 import { applyServerMessage, initialLobbyState } from './domain/lobby'
-import { StairClimbDisplay } from './game/StairClimbDisplay'
+import { getWebGameModule } from './games/registry'
 import './App.css'
 
 const DEFAULT_WS_URL = 'ws://localhost:8787'
 const HOST_NICKNAME = 'Host'
-const JOINER_NICKNAME = 'Display'
+const activeGameModule = getWebGameModule(DEFAULT_GAME_ID)
 
 const getWsUrl = (): string => import.meta.env.VITE_WS_URL ?? DEFAULT_WS_URL
 const getRoomCodeFromUrl = (): string =>
@@ -18,13 +18,14 @@ function App() {
   const initialRoomCode = getRoomCodeFromUrl()
   const wsRef = useRef<WebSocket | null>(null)
   const lobbyStateRef = useRef(initialLobbyState)
-  const autoJoinRequestedRef = useRef<string | null>(null)
+  const nicknameInputRef = useRef('')
   const autoReadySentRef = useRef<string | null>(null)
   const pendingHostActionRef = useRef<'start_game' | null>(null)
   const [wsConnected, setWsConnected] = useState(false)
   const [lobbyState, setLobbyState] = useState(initialLobbyState)
   const [joinMode, setJoinMode] = useState(initialRoomCode.length > 0)
   const [roomCodeInput, setRoomCodeInput] = useState(initialRoomCode)
+  const [nicknameInput, setNicknameInput] = useState('')
   const [localError, setLocalError] = useState<string | null>(null)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const [clock, setClock] = useState(Date.now())
@@ -52,6 +53,10 @@ function App() {
   useEffect(() => {
     lobbyStateRef.current = lobbyState
   }, [lobbyState])
+
+  useEffect(() => {
+    nicknameInputRef.current = nicknameInput
+  }, [nicknameInput])
 
   useEffect(() => {
     const ws = new WebSocket(wsUrl)
@@ -100,13 +105,17 @@ function App() {
         if (message.event === 'error') {
           if (message.payload.code === 'NOT_ROOM_HOST') {
             const current = lobbyStateRef.current
+            const currentNickname =
+              current.room?.players.find((player) => player.playerId === current.selfPlayerId)?.nickname ||
+              nicknameInputRef.current.trim() ||
+              'Player'
             if (current.room && current.rejoinToken) {
               sendMessage({
                 event: 'request_rejoin',
                 payload: {
                   roomCode: current.room.roomCode,
                   rejoinToken: current.rejoinToken,
-                  nickname: current.isHost ? HOST_NICKNAME : JOINER_NICKNAME
+                  nickname: current.isHost ? HOST_NICKNAME : currentNickname
                 }
               })
               setLocalError('房主連線失效，正在自動重連...')
@@ -161,25 +170,6 @@ function App() {
     lobbyState.room?.players.find((player) => player.playerId === lobbyState.selfPlayerId) ?? null
 
   useEffect(() => {
-    if (!wsConnected || lobbyState.room || !initialRoomCode) {
-      return
-    }
-
-    if (autoJoinRequestedRef.current === initialRoomCode) {
-      return
-    }
-
-    autoJoinRequestedRef.current = initialRoomCode
-    sendMessage({
-      event: 'join_room',
-      payload: {
-        roomCode: initialRoomCode,
-        nickname: JOINER_NICKNAME
-      }
-    })
-  }, [initialRoomCode, lobbyState.room, sendMessage, wsConnected])
-
-  useEffect(() => {
     if (!wsConnected || !lobbyState.room || !selfPlayer) {
       return
     }
@@ -215,8 +205,14 @@ function App() {
 
   const joinRoom = () => {
     const code = roomCodeInput.trim().toUpperCase()
+    const nickname = nicknameInput.trim()
     if (!code) {
       setLocalError('請輸入房間碼')
+      return
+    }
+
+    if (!nickname) {
+      setLocalError('請輸入暱稱')
       return
     }
 
@@ -224,13 +220,13 @@ function App() {
       event: 'join_room',
       payload: {
         roomCode: code,
-        nickname: JOINER_NICKNAME
+        nickname
       }
     })
   }
 
   const startGame = () => {
-    if (!lobbyState.room) {
+    if (!lobbyState.room || !lobbyState.isHost || playerCount === 0) {
       return
     }
 
@@ -262,6 +258,7 @@ function App() {
 
   const roomCode = lobbyState.room?.roomCode
   const playerCount = lobbyState.room?.players.length ?? 0
+  const canStartGame = lobbyState.isHost && playerCount > 0
   const scenePlayers =
     lobbyState.room?.players.map((player) => ({
       playerId: player.playerId,
@@ -318,7 +315,7 @@ function App() {
   if (isHostDisplayInRound && lobbyState.activeRound) {
     return (
       <main className="display-mode-shell">
-        <StairClimbDisplay
+        <activeGameModule.Display
           players={scenePlayers}
           progress={lobbyState.roundProgress}
           countdownSeconds={countdownSeconds}
@@ -331,11 +328,7 @@ function App() {
   if (isControllerInRound) {
     return (
       <main className="controller-mode-shell">
-        <section className="controller-button-block" data-testid="controller-button-block">
-          <button className="controller-tap-btn" onClick={tapNow} disabled={!canTap}>
-            踏上階梯
-          </button>
-        </section>
+        <activeGameModule.Controller canInput={canTap} onPrimaryInput={tapNow} />
       </main>
     )
   }
@@ -363,6 +356,13 @@ function App() {
                 onChange={(event) => setRoomCodeInput(event.target.value.toUpperCase())}
                 maxLength={6}
                 placeholder="輸入房間碼"
+              />
+              <input
+                aria-label="玩家暱稱"
+                value={nicknameInput}
+                onChange={(event) => setNicknameInput(event.target.value)}
+                maxLength={16}
+                placeholder="輸入你的暱稱"
               />
               <button className="primary-btn" onClick={joinRoom}>
                 確認加入
@@ -403,7 +403,7 @@ function App() {
                   目前加入人數 <strong>{playerCount} 人</strong>
                 </p>
                 <div className="room-actions">
-                  <button className="primary-btn" onClick={startGame} disabled={!lobbyState.isHost}>
+                  <button className="primary-btn" onClick={startGame} disabled={!canStartGame}>
                     開始遊戲
                   </button>
                   {isDevMode && (

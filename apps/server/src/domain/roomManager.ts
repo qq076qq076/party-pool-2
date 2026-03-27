@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 
 import {
+  DEFAULT_GAME_ID,
   type ErrorCode,
   type PlayerSnapshot,
   type RoomSnapshot,
@@ -8,9 +9,15 @@ import {
   normalizeRoomCode
 } from '@party-pool/shared'
 
+import { createServerGameRuntime } from '../games/registry'
+import type {
+  GameRoundFinishedEvent,
+  ServerGameRuntime,
+  StartGameRoundResult,
+  SubmitPlayerInputResult
+} from '../games/types'
+
 const READY_TIMEOUT_MS = 60_000
-const TAP_COUNTDOWN_MS = 3_000
-const TAP_ROUND_DURATION_MS = 20_000
 
 interface PlayerRecord extends PlayerSnapshot {
   socketId: string
@@ -20,21 +27,15 @@ interface PlayerRecord extends PlayerSnapshot {
 interface RoomRecord {
   roomId: string
   roomCode: string
-  hostPlayerId: string
+  hostSocketId: string | null
+  hostRejoinToken: string
+  hostNickname: string
   status: RoomSnapshot['status']
   maxPlayers: number
   players: PlayerRecord[]
   readyDeadlineAt: number | null
   roundNo: number
   createdAt: number
-}
-
-interface ActiveTapRound {
-  roomCode: string
-  roundNo: number
-  startAt: number
-  endAt: number
-  taps: Map<string, number>
 }
 
 interface RoomManagerOptions {
@@ -65,11 +66,11 @@ interface MarkReadyInput {
   playerId: string
 }
 
-interface StartTapRoundInput {
+interface StartGameRoundInput {
   roomCode: string
 }
 
-interface SubmitTapInput {
+interface SubmitPlayerInput {
   roomCode: string
   playerId: string
   inputValue: number
@@ -84,9 +85,10 @@ type JoinResult =
   | {
       ok: true
       room: RoomSnapshot
-      player: PlayerSnapshot
+      player: PlayerSnapshot | null
       rejoinToken: string
       rejoined: boolean
+      isHost: boolean
     }
   | ErrorResult
 
@@ -108,91 +110,37 @@ type MarkReadyResult =
 
 interface CreateRoomResult {
   room: RoomSnapshot
-  hostPlayerId: string
   rejoinToken: string
 }
 
-export interface TapRoundWindow {
-  roomCode: string
-  roundNo: number
-  countdownSec: number
-  durationSec: number
-  startAt: number
-  endAt: number
-}
-
-export interface TapRoundRankItem {
-  playerId: string
-  nickname: string
-  tapCount: number
-  scoreAfter: number
-}
-
-export interface TapRoundProgressItem {
-  playerId: string
-  tapCount: number
-}
-
-export interface TapRoundFinishedEvent {
-  roomCode: string
-  roundNo: number
-  winners: string[]
-  ranking: TapRoundRankItem[]
-  scoreboard: PlayerSnapshot[]
-}
-
-type StartTapRoundResult =
-  | {
-      ok: true
-      round: TapRoundWindow
-    }
-  | ErrorResult
-
-type SubmitTapInputResult =
-  | {
-      ok: true
-      accepted: boolean
-      tapCount: number
-      progress: TapRoundProgressItem[]
-    }
-  | ErrorResult
-
 export class RoomManager {
   private readonly rooms = new Map<string, RoomRecord>()
-  private readonly activeTapRounds = new Map<string, ActiveTapRound>()
+  private readonly gameRuntime: ServerGameRuntime
   private readonly now: () => number
   private readonly codeGenerator: () => string
 
   constructor(options: RoomManagerOptions = {}) {
     this.now = options.now ?? (() => Date.now())
     this.codeGenerator = options.codeGenerator ?? (() => nanoid(4).toUpperCase())
+    this.gameRuntime = createServerGameRuntime(DEFAULT_GAME_ID, {
+      now: this.now
+    })
   }
 
   createRoom(input: CreateRoomInput): CreateRoomResult {
     const roomCode = this.generateRoomCode()
     const now = this.now()
-    const hostPlayerId = nanoid(10)
     const rejoinToken = nanoid(24)
-
-    const host: PlayerRecord = {
-      playerId: hostPlayerId,
-      nickname: this.normalizeNickname(input.hostNickname),
-      socketId: input.hostSocketId,
-      isConnected: true,
-      readyStatus: 'pending',
-      score: 0,
-      sensorStatus: 'unknown',
-      lastSeenAt: now,
-      rejoinToken
-    }
 
     const room: RoomRecord = {
       roomId: nanoid(12),
       roomCode,
-      hostPlayerId,
+      hostSocketId: input.hostSocketId,
+      hostRejoinToken: rejoinToken,
+      hostNickname: this.normalizeNickname(input.hostNickname),
       status: 'waiting',
       maxPlayers: input.maxPlayers,
-      players: [host],
+      players: [],
       readyDeadlineAt: null,
       roundNo: 1,
       createdAt: now
@@ -202,7 +150,6 @@ export class RoomManager {
 
     return {
       room: this.toRoomSnapshot(room),
-      hostPlayerId,
       rejoinToken
     }
   }
@@ -213,16 +160,20 @@ export class RoomManager {
       return this.error('ROOM_NOT_FOUND')
     }
 
-    if (room.status === 'playing' || room.status === 'ended') {
-      return this.error('ROOM_NOT_JOINABLE')
-    }
-
-    const nickname = this.normalizeNickname(input.nickname)
-    if (!nickname) {
-      return this.error('INVALID_NICKNAME')
-    }
-
     if (input.rejoinToken) {
+      if (input.rejoinToken === room.hostRejoinToken) {
+        room.hostSocketId = input.socketId
+
+        return {
+          ok: true,
+          room: this.toRoomSnapshot(room),
+          player: null,
+          rejoinToken: room.hostRejoinToken,
+          rejoined: true,
+          isHost: true
+        }
+      }
+
       const rejoinPlayer = room.players.find(
         (player) => player.rejoinToken === input.rejoinToken
       )
@@ -240,8 +191,18 @@ export class RoomManager {
         room: this.toRoomSnapshot(room),
         player: this.toPlayerSnapshot(rejoinPlayer),
         rejoinToken: rejoinPlayer.rejoinToken,
-        rejoined: true
+        rejoined: true,
+        isHost: false
       }
+    }
+
+    if (room.status === 'playing' || room.status === 'ended') {
+      return this.error('ROOM_NOT_JOINABLE')
+    }
+
+    const nickname = this.normalizeNickname(input.nickname)
+    if (!nickname) {
+      return this.error('INVALID_NICKNAME')
     }
 
     const duplicated = room.players.some(
@@ -274,7 +235,8 @@ export class RoomManager {
       room: this.toRoomSnapshot(room),
       player: this.toPlayerSnapshot(player),
       rejoinToken: player.rejoinToken,
-      rejoined: false
+      rejoined: false,
+      isHost: false
     }
   }
 
@@ -284,10 +246,12 @@ export class RoomManager {
       return this.error('ROOM_NOT_FOUND')
     }
 
-    const hostPlayer = room.players.find((player) => player.playerId === room.hostPlayerId)
-
-    if (!hostPlayer || !hostPlayer.isConnected || hostPlayer.socketId !== input.requesterSocketId) {
+    if (!room.hostSocketId || room.hostSocketId !== input.requesterSocketId) {
       return this.error('NOT_ROOM_HOST')
+    }
+
+    if (room.players.length === 0) {
+      return this.error('ROUND_NOT_READY')
     }
 
     room.status = 'readying'
@@ -323,7 +287,8 @@ export class RoomManager {
     player.lastSeenAt = this.now()
 
     const activePlayers = room.players.filter((item) => item.isConnected)
-    const everyoneReady = activePlayers.every((item) => item.readyStatus === 'ok')
+    const everyoneReady =
+      activePlayers.length > 0 && activePlayers.every((item) => item.readyStatus === 'ok')
 
     if (everyoneReady) {
       room.status = 'playing'
@@ -356,158 +321,39 @@ export class RoomManager {
     return startedRooms
   }
 
-  startTapRound(input: StartTapRoundInput): StartTapRoundResult {
+  startGameRound(input: StartGameRoundInput): StartGameRoundResult {
     const room = this.getRoomRecord(input.roomCode)
     if (!room) {
       return this.error('ROOM_NOT_FOUND')
     }
 
-    if (room.status !== 'playing') {
-      return this.error('ROUND_NOT_READY')
+    return this.gameRuntime.startRound(room)
+  }
+
+  submitPlayerInput(input: SubmitPlayerInput): SubmitPlayerInputResult {
+    const room = this.getRoomRecord(input.roomCode)
+    if (!room) {
+      return this.error('ROOM_NOT_FOUND')
     }
 
-    if (this.activeTapRounds.has(room.roomCode)) {
-      return this.error('ROUND_NOT_READY')
-    }
-
-    const now = this.now()
-    const startAt = now + TAP_COUNTDOWN_MS
-    const endAt = startAt + TAP_ROUND_DURATION_MS
-    const taps = new Map<string, number>()
-
-    for (const player of room.players) {
-      taps.set(player.playerId, 0)
-    }
-
-    this.activeTapRounds.set(room.roomCode, {
-      roomCode: room.roomCode,
-      roundNo: room.roundNo,
-      startAt,
-      endAt,
-      taps
+    return this.gameRuntime.submitInput(room, {
+      playerId: input.playerId,
+      inputValue: input.inputValue
     })
-
-    return {
-      ok: true,
-      round: {
-        roomCode: room.roomCode,
-        roundNo: room.roundNo,
-        countdownSec: TAP_COUNTDOWN_MS / 1000,
-        durationSec: TAP_ROUND_DURATION_MS / 1000,
-        startAt,
-        endAt
-      }
-    }
   }
 
-  submitTapInput(input: SubmitTapInput): SubmitTapInputResult {
-    const room = this.getRoomRecord(input.roomCode)
-    if (!room) {
-      return this.error('ROOM_NOT_FOUND')
-    }
-
-    const round = this.activeTapRounds.get(room.roomCode)
-    if (!round) {
-      return this.error('ROUND_NOT_READY')
-    }
-
-    const player = room.players.find((item) => item.playerId === input.playerId)
-    if (!player || !player.isConnected) {
-      return {
-        ok: true,
-        accepted: false,
-        tapCount: round.taps.get(input.playerId) ?? 0,
-        progress: this.toTapRoundProgress(round)
-      }
-    }
-
-    const now = this.now()
-    if (now < round.startAt || now > round.endAt) {
-      return {
-        ok: true,
-        accepted: false,
-        tapCount: round.taps.get(player.playerId) ?? 0,
-        progress: this.toTapRoundProgress(round)
-      }
-    }
-
-    const add = Math.max(1, Math.floor(input.inputValue))
-    const current = round.taps.get(player.playerId) ?? 0
-    const next = current + add
-    round.taps.set(player.playerId, next)
-
-    return {
-      ok: true,
-      accepted: true,
-      tapCount: next,
-      progress: this.toTapRoundProgress(round)
-    }
-  }
-
-  tickTapRounds(): TapRoundFinishedEvent[] {
-    const now = this.now()
-    const finished: TapRoundFinishedEvent[] = []
-
-    for (const round of this.activeTapRounds.values()) {
-      if (now < round.endAt) {
-        continue
-      }
-
-      const room = this.getRoomRecord(round.roomCode)
-      if (!room) {
-        this.activeTapRounds.delete(round.roomCode)
-        continue
-      }
-
-      const ranking = room.players
-        .map((player) => ({
-          player,
-          tapCount: round.taps.get(player.playerId) ?? 0
-        }))
-        .sort((a, b) => b.tapCount - a.tapCount)
-
-      const topScore = ranking[0]?.tapCount ?? 0
-      const winners = ranking
-        .filter((item) => item.tapCount === topScore)
-        .map((item) => item.player.playerId)
-
-      for (const winnerId of winners) {
-        const winner = room.players.find((player) => player.playerId === winnerId)
-        if (winner) {
-          winner.score += 1
-        }
-      }
-
-      room.status = 'waiting'
-      room.readyDeadlineAt = null
-      room.roundNo += 1
-      for (const player of room.players) {
-        player.readyStatus = 'pending'
-      }
-
-      finished.push({
-        roomCode: room.roomCode,
-        roundNo: round.roundNo,
-        winners,
-        ranking: ranking.map((item) => ({
-          playerId: item.player.playerId,
-          nickname: item.player.nickname,
-          tapCount: item.tapCount,
-          scoreAfter: item.player.score
-        })),
-        scoreboard: this.toRoomSnapshot(room).players
-      })
-
-      this.activeTapRounds.delete(room.roomCode)
-    }
-
-    return finished
+  tickGameRounds(): GameRoundFinishedEvent[] {
+    return this.gameRuntime.tick((roomCode) => this.getRoomRecord(roomCode))
   }
 
   disconnectSocket(socketId: string): string[] {
     const changedRoomCodes: string[] = []
 
     for (const room of this.rooms.values()) {
+      if (room.hostSocketId === socketId) {
+        room.hostSocketId = null
+      }
+
       const player = room.players.find((item) => item.socketId === socketId)
       if (!player || !player.isConnected) {
         continue
@@ -580,12 +426,5 @@ export class RoomManager {
       return ''
     }
     return trimmed
-  }
-
-  private toTapRoundProgress(round: ActiveTapRound): TapRoundProgressItem[] {
-    return Array.from(round.taps.entries()).map(([playerId, tapCount]) => ({
-      playerId,
-      tapCount
-    }))
   }
 }

@@ -1,3 +1,5 @@
+export * from './games'
+
 export const ROOM_CODE_REGEX = /^[A-Z0-9]{4,6}$/
 
 export type Locale = 'zh-TW' | 'en'
@@ -114,12 +116,12 @@ export interface ErrorPayload {
 }
 
 export type ServerMessage =
-  | Envelope<'room_created', { room: RoomSnapshot; playerId: string; rejoinToken: string }>
+  | Envelope<'room_created', { room: RoomSnapshot; playerId: string | null; rejoinToken: string }>
   | Envelope<
       'room_joined',
       {
         room: RoomSnapshot
-        playerId: string
+        playerId: string | null
         rejoinToken: string
         rejoined: boolean
         isHost: boolean

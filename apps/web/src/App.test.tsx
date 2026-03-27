@@ -97,22 +97,12 @@ describe('App host UI', () => {
           roomCode: 'ABCD',
           status: 'waiting',
           maxPlayers: 8,
-          players: [
-            {
-              playerId: 'host-1',
-              nickname: 'Host',
-              isConnected: true,
-              readyStatus: 'pending',
-              score: 0,
-              sensorStatus: 'unknown',
-              lastSeenAt: Date.now()
-            }
-          ],
+          players: [],
           readyDeadlineAt: null,
           roundNo: 1,
           createdAt: Date.now()
         },
-        playerId: 'host-1',
+        playerId: null,
         rejoinToken: 'token-1'
       }
     })
@@ -126,15 +116,6 @@ describe('App host UI', () => {
           status: 'waiting',
           maxPlayers: 8,
           players: [
-            {
-              playerId: 'host-1',
-              nickname: 'Host',
-              isConnected: true,
-              readyStatus: 'pending',
-              score: 0,
-              sensorStatus: 'unknown',
-              lastSeenAt: Date.now()
-            },
             {
               playerId: 'p-2',
               nickname: 'P2',
@@ -155,7 +136,7 @@ describe('App host UI', () => {
     expect(await screen.findByText('房間碼')).toBeInTheDocument()
     expect(screen.getByText('ABCD')).toBeInTheDocument()
     expect(screen.getByText('目前加入人數')).toBeInTheDocument()
-    expect(screen.getByText('2 人')).toBeInTheDocument()
+    expect(screen.getByText('1 人')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: '加入房間 QRCode' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '開始遊戲' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '複製QRCode網址' })).toBeInTheDocument()
@@ -188,22 +169,12 @@ describe('App host UI', () => {
           roomCode: 'ABCD',
           status: 'waiting',
           maxPlayers: 8,
-          players: [
-            {
-              playerId: 'host-1',
-              nickname: 'Host',
-              isConnected: true,
-              readyStatus: 'pending',
-              score: 0,
-              sensorStatus: 'unknown',
-              lastSeenAt: Date.now()
-            }
-          ],
+          players: [],
           readyDeadlineAt: null,
           roundNo: 1,
           createdAt: Date.now()
         },
-        playerId: 'host-1',
+        playerId: null,
         rejoinToken: 'token-1'
       }
     })
@@ -239,22 +210,12 @@ describe('App host UI', () => {
           roomCode: 'ABCD',
           status: 'playing',
           maxPlayers: 8,
-          players: [
-            {
-              playerId: 'host-1',
-              nickname: 'Host',
-              isConnected: true,
-              readyStatus: 'ok',
-              score: 0,
-              sensorStatus: 'unknown',
-              lastSeenAt: Date.now()
-            }
-          ],
+          players: [],
           readyDeadlineAt: null,
           roundNo: 1,
           createdAt: Date.now()
         },
-        playerId: 'host-1',
+        playerId: null,
         rejoinToken: 'token-1'
       }
     })
@@ -268,8 +229,8 @@ describe('App host UI', () => {
           maxPlayers: 8,
           players: [
             {
-              playerId: 'host-1',
-              nickname: 'Host',
+              playerId: 'player-2',
+              nickname: 'P2',
               isConnected: true,
               readyStatus: 'ok',
               score: 0,
@@ -322,15 +283,6 @@ describe('App host UI', () => {
           status: 'playing',
           maxPlayers: 8,
           players: [
-            {
-              playerId: 'host-1',
-              nickname: 'Host',
-              isConnected: true,
-              readyStatus: 'ok',
-              score: 0,
-              sensorStatus: 'unknown',
-              lastSeenAt: Date.now()
-            },
             {
               playerId: 'player-2',
               nickname: 'P2',
@@ -391,15 +343,41 @@ describe('App host UI', () => {
     fireEvent.change(screen.getByLabelText('加入房間碼'), {
       target: { value: 'ABCD' }
     })
+    fireEvent.change(screen.getByLabelText('玩家暱稱'), {
+      target: { value: 'Alice' }
+    })
     fireEvent.click(screen.getByRole('button', { name: '確認加入' }))
 
     const ws = MockWebSocket.instances[0]
     const lastSent = ws.sent.at(-1) ?? ''
     expect(lastSent).toContain('join_room')
+    expect(lastSent).toContain('Alice')
     expect(lastSent).not.toContain('stale-token')
   })
 
-  it('auto joins room from qrcode roomCode url param', async () => {
+  it('requires nickname before sending join_room', async () => {
+    render(<App />)
+
+    await waitFor(() => {
+      expect(MockWebSocket.instances.length).toBe(1)
+    })
+    await waitFor(() => {
+      expect(screen.getByText('連線狀態：已連線')).toBeInTheDocument()
+    })
+
+    const ws = MockWebSocket.instances[0]
+
+    fireEvent.click(screen.getByRole('button', { name: '加入房間' }))
+    fireEvent.change(screen.getByLabelText('加入房間碼'), {
+      target: { value: 'ABCD' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: '確認加入' }))
+
+    expect(ws.sent.some((item) => item.includes('join_room'))).toBe(false)
+    expect(screen.getByText('請輸入暱稱')).toBeInTheDocument()
+  })
+
+  it('prefills room code from qrcode url param and waits for nickname before joining', async () => {
     window.history.replaceState({}, '', '/?roomCode=ABCD')
 
     render(<App />)
@@ -412,16 +390,23 @@ describe('App host UI', () => {
     })
 
     const ws = MockWebSocket.instances[0]
+    expect(screen.getByLabelText('加入房間碼')).toHaveValue('ABCD')
+    expect(ws.sent.some((item) => item.includes('join_room'))).toBe(false)
+
+    fireEvent.change(screen.getByLabelText('玩家暱稱'), {
+      target: { value: 'Bob' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: '確認加入' }))
 
     await waitFor(() => {
       const lastSent = ws.sent.at(-1) ?? ''
       expect(lastSent).toContain('join_room')
       expect(lastSent).toContain('ABCD')
-      expect(lastSent).toContain('Display')
+      expect(lastSent).toContain('Bob')
     })
   })
 
-  it('auto sends ready confirmation after host enters ready phase', async () => {
+  it('auto sends ready confirmation from joined controller after host enters ready phase', async () => {
     render(<App />)
 
     await waitFor(() => {
@@ -432,10 +417,8 @@ describe('App host UI', () => {
     })
 
     const ws = MockWebSocket.instances[0]
-    fireEvent.click(screen.getByRole('button', { name: '開房間' }))
-
     ws.emitMessage({
-      event: 'room_created',
+      event: 'room_joined',
       payload: {
         room: {
           roomId: 'room-1',
@@ -444,8 +427,8 @@ describe('App host UI', () => {
           maxPlayers: 8,
           players: [
             {
-              playerId: 'host-1',
-              nickname: 'Host',
+              playerId: 'player-2',
+              nickname: 'P2',
               isConnected: true,
               readyStatus: 'pending',
               score: 0,
@@ -457,16 +440,11 @@ describe('App host UI', () => {
           roundNo: 1,
           createdAt: Date.now()
         },
-        playerId: 'host-1',
-        rejoinToken: 'token-1'
+        playerId: 'player-2',
+        rejoinToken: 'token-2',
+        rejoined: false,
+        isHost: false
       }
-    })
-
-    fireEvent.click(await screen.findByRole('button', { name: '開始遊戲' }))
-
-    await waitFor(() => {
-      const lastSent = ws.sent.at(-1) ?? ''
-      expect(lastSent).toContain('host_enter_ready_phase')
     })
 
     ws.emitMessage({
@@ -487,8 +465,8 @@ describe('App host UI', () => {
           maxPlayers: 8,
           players: [
             {
-              playerId: 'host-1',
-              nickname: 'Host',
+              playerId: 'player-2',
+              nickname: 'P2',
               isConnected: true,
               readyStatus: 'pending',
               score: 0,
@@ -506,7 +484,7 @@ describe('App host UI', () => {
     await waitFor(() => {
       const lastSent = ws.sent.at(-1) ?? ''
       expect(lastSent).toContain('player_ready_ok')
-      expect(lastSent).toContain('host-1')
+      expect(lastSent).toContain('player-2')
     })
 
     ws.emitMessage({
@@ -529,7 +507,7 @@ describe('App host UI', () => {
       }
     })
 
-    expect(await screen.findByTestId('stair-climb-display')).toBeInTheDocument()
+    expect(await screen.findByTestId('controller-button-block')).toBeInTheDocument()
   })
 
   it('retries start game after rejoin when server returns NOT_ROOM_HOST', async () => {
@@ -553,10 +531,28 @@ describe('App host UI', () => {
           roomCode: 'ABCD',
           status: 'waiting',
           maxPlayers: 8,
+          players: [],
+          readyDeadlineAt: null,
+          roundNo: 1,
+          createdAt: Date.now()
+        },
+        playerId: null,
+        rejoinToken: 'token-1'
+      }
+    })
+
+    ws.emitMessage({
+      event: 'room_state_updated',
+      payload: {
+        room: {
+          roomId: 'room-1',
+          roomCode: 'ABCD',
+          status: 'waiting',
+          maxPlayers: 8,
           players: [
             {
-              playerId: 'host-1',
-              nickname: 'Host',
+              playerId: 'player-2',
+              nickname: 'P2',
               isConnected: true,
               readyStatus: 'pending',
               score: 0,
@@ -567,9 +563,7 @@ describe('App host UI', () => {
           readyDeadlineAt: null,
           roundNo: 1,
           createdAt: Date.now()
-        },
-        playerId: 'host-1',
-        rejoinToken: 'token-1'
+        }
       }
     })
 
@@ -606,8 +600,8 @@ describe('App host UI', () => {
           maxPlayers: 8,
           players: [
             {
-              playerId: 'host-1',
-              nickname: 'Host',
+              playerId: 'player-2',
+              nickname: 'P2',
               isConnected: true,
               readyStatus: 'pending',
               score: 0,
@@ -619,7 +613,7 @@ describe('App host UI', () => {
           roundNo: 1,
           createdAt: Date.now()
         },
-        playerId: 'host-1',
+        playerId: null,
         rejoinToken: 'token-1',
         rejoined: true,
         isHost: true

@@ -19,6 +19,8 @@ const wss = new WebSocketServer({ port: PORT })
 
 const socketsById = new Map<string, WebSocket>()
 const playerToSocket = new Map<string, string>()
+const roomToHostSocket = new Map<string, string>()
+const hostSocketToRoom = new Map<string, string>()
 
 const send = (socket: WebSocket, message: ServerMessage): void => {
   socket.send(JSON.stringify(message))
@@ -53,27 +55,26 @@ const emitRoomState = (room: RoomSnapshot): void => {
     }
   }
 
-  for (const player of room.players) {
-    const socketId = playerToSocket.get(player.playerId)
-    if (!socketId) {
-      continue
-    }
-
-    const socket = socketsById.get(socketId)
-    if (!socket || socket.readyState !== socket.OPEN) {
-      continue
-    }
-
-    send(socket, message)
-  }
+  broadcastToRoom(room, message)
 }
 
 const broadcastToRoom = (room: RoomSnapshot, message: ServerMessage): void => {
+  const targetSocketIds = new Set<string>()
+
   for (const player of room.players) {
     const socketId = playerToSocket.get(player.playerId)
     if (!socketId) {
       continue
     }
+    targetSocketIds.add(socketId)
+  }
+
+  const hostSocketId = roomToHostSocket.get(room.roomCode)
+  if (hostSocketId) {
+    targetSocketIds.add(hostSocketId)
+  }
+
+  for (const socketId of targetSocketIds) {
     const socket = socketsById.get(socketId)
     if (!socket || socket.readyState !== socket.OPEN) {
       continue
@@ -102,12 +103,35 @@ const bindPlayerSocket = (playerId: string, socketId: string): void => {
   playerToSocket.set(playerId, socketId)
 }
 
+const bindHostSocket = (roomCode: string, socketId: string): void => {
+  const previousSocketId = roomToHostSocket.get(roomCode)
+  if (previousSocketId) {
+    hostSocketToRoom.delete(previousSocketId)
+  }
+
+  roomToHostSocket.set(roomCode, socketId)
+  hostSocketToRoom.set(socketId, roomCode)
+}
+
 const removePlayerSocketBindings = (socketId: string): void => {
   for (const [playerId, mappedSocketId] of playerToSocket.entries()) {
     if (mappedSocketId === socketId) {
       playerToSocket.delete(playerId)
     }
   }
+}
+
+const removeHostSocketBinding = (socketId: string): void => {
+  const roomCode = hostSocketToRoom.get(socketId)
+  if (!roomCode) {
+    return
+  }
+
+  if (roomToHostSocket.get(roomCode) === socketId) {
+    roomToHostSocket.delete(roomCode)
+  }
+
+  hostSocketToRoom.delete(socketId)
 }
 
 wss.on('connection', (socket) => {
@@ -130,7 +154,7 @@ wss.on('connection', (socket) => {
         maxPlayers
       })
 
-      bindPlayerSocket(created.hostPlayerId, socketId)
+      bindHostSocket(created.room.roomCode, socketId)
 
       send(socket, {
         event: 'room_created',
@@ -138,7 +162,7 @@ wss.on('connection', (socket) => {
         sentAt: Date.now(),
         payload: {
           room: created.room,
-          playerId: created.hostPlayerId,
+          playerId: null,
           rejoinToken: created.rejoinToken
         }
       })
@@ -169,7 +193,11 @@ wss.on('connection', (socket) => {
         return
       }
 
-      bindPlayerSocket(joined.player.playerId, socketId)
+      if (joined.isHost) {
+        bindHostSocket(joined.room.roomCode, socketId)
+      } else if (joined.player) {
+        bindPlayerSocket(joined.player.playerId, socketId)
+      }
 
       send(socket, {
         event: 'room_joined',
@@ -177,10 +205,10 @@ wss.on('connection', (socket) => {
         sentAt: Date.now(),
         payload: {
           room: joined.room,
-          playerId: joined.player.playerId,
+          playerId: joined.player?.playerId ?? null,
           rejoinToken: joined.rejoinToken,
           rejoined: joined.rejoined,
-          isHost: joined.player.playerId === joined.room.players[0]?.playerId
+          isHost: joined.isHost
         }
       })
 
@@ -210,19 +238,7 @@ wss.on('connection', (socket) => {
         }
       }
 
-      for (const player of entered.room.players) {
-        const targetSocketId = playerToSocket.get(player.playerId)
-        if (!targetSocketId) {
-          continue
-        }
-
-        const targetSocket = socketsById.get(targetSocketId)
-        if (!targetSocket || targetSocket.readyState !== targetSocket.OPEN) {
-          continue
-        }
-
-        send(targetSocket, message)
-      }
+      broadcastToRoom(entered.room, message)
 
       emitRoomState(entered.room)
       return
@@ -251,17 +267,7 @@ wss.on('connection', (socket) => {
         }
       }
 
-      for (const player of room.players) {
-        const targetSocketId = playerToSocket.get(player.playerId)
-        if (!targetSocketId) {
-          continue
-        }
-        const targetSocket = socketsById.get(targetSocketId)
-        if (!targetSocket || targetSocket.readyState !== targetSocket.OPEN) {
-          continue
-        }
-        send(targetSocket, readyStatusMessage)
-      }
+      broadcastToRoom(room, readyStatusMessage)
 
       if (marked.gameStarted) {
         const gameStartedMessage: ServerMessage = {
@@ -275,21 +281,9 @@ wss.on('connection', (socket) => {
           }
         }
 
-        for (const player of room.players) {
-          const targetSocketId = playerToSocket.get(player.playerId)
-          if (!targetSocketId) {
-            continue
-          }
+        broadcastToRoom(room, gameStartedMessage)
 
-          const targetSocket = socketsById.get(targetSocketId)
-          if (!targetSocket || targetSocket.readyState !== targetSocket.OPEN) {
-            continue
-          }
-
-          send(targetSocket, gameStartedMessage)
-        }
-
-        const startedRound = roomManager.startTapRound({ roomCode: room.roomCode })
+        const startedRound = roomManager.startGameRound({ roomCode: room.roomCode })
         if (startedRound.ok) {
           const roundStartedMessage: ServerMessage = {
             event: 'round_started',
@@ -313,7 +307,7 @@ wss.on('connection', (socket) => {
     }
 
     if (parsed.event === 'player_input') {
-      const submitted = roomManager.submitTapInput({
+      const submitted = roomManager.submitPlayerInput({
         roomCode: parsed.payload.roomCode,
         playerId: parsed.payload.playerId,
         inputValue: parsed.payload.inputValue
@@ -347,6 +341,7 @@ wss.on('connection', (socket) => {
 
   socket.on('close', () => {
     socketsById.delete(socketId)
+    removeHostSocketBinding(socketId)
     removePlayerSocketBindings(socketId)
 
     const changedRooms = roomManager.disconnectSocket(socketId)
@@ -374,21 +369,9 @@ setInterval(() => {
       }
     }
 
-    for (const player of room.players) {
-      const socketId = playerToSocket.get(player.playerId)
-      if (!socketId) {
-        continue
-      }
+    broadcastToRoom(room, startedMessage)
 
-      const socket = socketsById.get(socketId)
-      if (!socket || socket.readyState !== socket.OPEN) {
-        continue
-      }
-
-      send(socket, startedMessage)
-    }
-
-    const startedRound = roomManager.startTapRound({ roomCode: room.roomCode })
+    const startedRound = roomManager.startGameRound({ roomCode: room.roomCode })
     if (startedRound.ok) {
       const roundStartedMessage: ServerMessage = {
         event: 'round_started',
@@ -408,7 +391,7 @@ setInterval(() => {
     emitRoomState(room)
   }
 
-  const finishedRounds = roomManager.tickTapRounds()
+  const finishedRounds = roomManager.tickGameRounds()
   for (const finished of finishedRounds) {
     const room = roomManager.getRoomByCode(finished.roomCode)
     if (!room) {

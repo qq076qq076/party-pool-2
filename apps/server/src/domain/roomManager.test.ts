@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { RoomManager } from './roomManager'
 
 describe('RoomManager', () => {
-  it('creates room with host and rejoin token', () => {
+  it('creates room without counting host as a player', () => {
     const manager = new RoomManager({
       now: () => 1_000,
       codeGenerator: () => 'ABCD'
@@ -16,9 +16,8 @@ describe('RoomManager', () => {
     })
 
     expect(created.room.roomCode).toBe('ABCD')
-    expect(created.room.players).toHaveLength(1)
+    expect(created.room.players).toHaveLength(0)
     expect(created.rejoinToken.length).toBeGreaterThan(10)
-    expect(created.room.players[0].nickname).toBe('Host')
   })
 
   it('joins room with new player and prevents duplicate nickname', () => {
@@ -41,7 +40,7 @@ describe('RoomManager', () => {
 
     expect(joinResult.ok).toBe(true)
     if (joinResult.ok) {
-      expect(joinResult.room.players).toHaveLength(2)
+      expect(joinResult.room.players).toHaveLength(1)
       expect(joinResult.rejoined).toBe(false)
     }
 
@@ -57,7 +56,43 @@ describe('RoomManager', () => {
     }
   })
 
-  it('rejoins with token and keeps same player slot', () => {
+  it('allows two joined players when maxPlayers is 2 because host is not counted', () => {
+    const manager = new RoomManager({
+      now: () => 2_500,
+      codeGenerator: () => 'MAX2'
+    })
+
+    manager.createRoom({
+      hostSocketId: 'host-socket',
+      hostNickname: 'Host',
+      maxPlayers: 2
+    })
+
+    const joinA = manager.joinRoom({
+      roomCode: 'MAX2',
+      socketId: 'p1-socket',
+      nickname: 'Alice'
+    })
+    const joinB = manager.joinRoom({
+      roomCode: 'MAX2',
+      socketId: 'p2-socket',
+      nickname: 'Bob'
+    })
+    const joinC = manager.joinRoom({
+      roomCode: 'MAX2',
+      socketId: 'p3-socket',
+      nickname: 'Carol'
+    })
+
+    expect(joinA.ok).toBe(true)
+    expect(joinB.ok).toBe(true)
+    expect(joinC.ok).toBe(false)
+    if (!joinC.ok) {
+      expect(joinC.code).toBe('ROOM_FULL')
+    }
+  })
+
+  it('rejoins host display with token without creating a player slot', () => {
     const manager = new RoomManager({
       now: () => 3_000,
       codeGenerator: () => 'REJ1'
@@ -79,9 +114,9 @@ describe('RoomManager', () => {
     expect(rejoin.ok).toBe(true)
     if (rejoin.ok) {
       expect(rejoin.rejoined).toBe(true)
-      expect(rejoin.player.playerId).toBe(created.hostPlayerId)
-      expect(rejoin.room.players).toHaveLength(1)
-      expect(rejoin.player.isConnected).toBe(true)
+      expect(rejoin.isHost).toBe(true)
+      expect(rejoin.player).toBeNull()
+      expect(rejoin.room.players).toHaveLength(0)
     }
   })
 
@@ -92,7 +127,7 @@ describe('RoomManager', () => {
       codeGenerator: () => 'RDY1'
     })
 
-    const created = manager.createRoom({
+    manager.createRoom({
       hostSocketId: 'host-socket',
       hostNickname: 'Host',
       maxPlayers: 8
@@ -108,6 +143,10 @@ describe('RoomManager', () => {
     if (!joinResult.ok) {
       return
     }
+    expect(joinResult.player).not.toBeNull()
+    if (!joinResult.player) {
+      return
+    }
 
     const enterReady = manager.enterReadyPhase({
       roomCode: 'RDY1',
@@ -119,15 +158,6 @@ describe('RoomManager', () => {
       return
     }
     expect(enterReady.readyDeadlineAt).toBe(70_000)
-
-    const hostReady = manager.markPlayerReady({
-      roomCode: 'RDY1',
-      playerId: created.hostPlayerId
-    })
-    expect(hostReady.ok).toBe(true)
-    if (hostReady.ok) {
-      expect(hostReady.gameStarted).toBe(false)
-    }
 
     const p2Ready = manager.markPlayerReady({
       roomCode: 'RDY1',
@@ -142,6 +172,29 @@ describe('RoomManager', () => {
     nowMs = 80_000
     const startedByTimeout = manager.startReadyTimeoutRooms()
     expect(startedByTimeout).toHaveLength(0)
+  })
+
+  it('does not enter ready phase when no joined players exist', () => {
+    const manager = new RoomManager({
+      now: () => 50_000,
+      codeGenerator: () => 'ZERO'
+    })
+
+    manager.createRoom({
+      hostSocketId: 'host-socket',
+      hostNickname: 'Host',
+      maxPlayers: 8
+    })
+
+    const enterReady = manager.enterReadyPhase({
+      roomCode: 'ZERO',
+      requesterSocketId: 'host-socket'
+    })
+
+    expect(enterReady.ok).toBe(false)
+    if (!enterReady.ok) {
+      expect(enterReady.code).toBe('ROUND_NOT_READY')
+    }
   })
 
   it('auto starts by ready timeout when not all players confirm', () => {
@@ -200,12 +253,17 @@ describe('RoomManager', () => {
     if (!join.ok) {
       return
     }
+    expect(join.player).not.toBeNull()
+    if (!join.player) {
+      return
+    }
+    const joinedPlayer = join.player
 
     const changed = manager.disconnectSocket('p2-socket')
     expect(changed).toEqual(['DISC'])
 
     const snapshot = manager.getRoomByCode('DISC')
-    const player = snapshot?.players.find((item) => item.playerId === join.player.playerId)
+    const player = snapshot?.players.find((item) => item.playerId === joinedPlayer.playerId)
     expect(player?.isConnected).toBe(false)
   })
 
@@ -216,21 +274,41 @@ describe('RoomManager', () => {
       codeGenerator: () => 'TAP1'
     })
 
-    const created = manager.createRoom({
+    manager.createRoom({
       hostSocketId: 'host-socket',
       hostNickname: 'Host',
       maxPlayers: 8
     })
 
-    const join = manager.joinRoom({
+    const joinA = manager.joinRoom({
+      roomCode: 'TAP1',
+      socketId: 'p1-socket',
+      nickname: 'P1'
+    })
+    expect(joinA.ok).toBe(true)
+    if (!joinA.ok) {
+      return
+    }
+    expect(joinA.player).not.toBeNull()
+    if (!joinA.player) {
+      return
+    }
+    const joinAPlayer = joinA.player
+
+    const joinB = manager.joinRoom({
       roomCode: 'TAP1',
       socketId: 'p2-socket',
       nickname: 'P2'
     })
-    expect(join.ok).toBe(true)
-    if (!join.ok) {
+    expect(joinB.ok).toBe(true)
+    if (!joinB.ok) {
       return
     }
+    expect(joinB.player).not.toBeNull()
+    if (!joinB.player) {
+      return
+    }
+    const joinBPlayer = joinB.player
 
     manager.enterReadyPhase({
       roomCode: 'TAP1',
@@ -238,22 +316,22 @@ describe('RoomManager', () => {
     })
     manager.markPlayerReady({
       roomCode: 'TAP1',
-      playerId: created.hostPlayerId
+      playerId: joinAPlayer.playerId
     })
     manager.markPlayerReady({
       roomCode: 'TAP1',
-      playerId: join.player.playerId
+      playerId: joinBPlayer.playerId
     })
 
-    const roundStart = manager.startTapRound({ roomCode: 'TAP1' })
+    const roundStart = manager.startGameRound({ roomCode: 'TAP1' })
     expect(roundStart.ok).toBe(true)
     if (!roundStart.ok) {
       return
     }
 
-    const beforeStart = manager.submitTapInput({
+    const beforeStart = manager.submitPlayerInput({
       roomCode: 'TAP1',
-      playerId: created.hostPlayerId,
+      playerId: joinAPlayer.playerId,
       inputValue: 1
     })
     expect(beforeStart.ok).toBe(true)
@@ -262,9 +340,9 @@ describe('RoomManager', () => {
     }
 
     nowMs = roundStart.round.startAt + 20
-    const duringRound = manager.submitTapInput({
+    const duringRound = manager.submitPlayerInput({
       roomCode: 'TAP1',
-      playerId: created.hostPlayerId,
+      playerId: joinAPlayer.playerId,
       inputValue: 1
     })
     expect(duringRound.ok).toBe(true)
@@ -272,8 +350,8 @@ describe('RoomManager', () => {
       expect(duringRound.accepted).toBe(true)
       expect(duringRound.tapCount).toBe(1)
       expect(duringRound.progress).toEqual([
-        { playerId: created.hostPlayerId, tapCount: 1 },
-        { playerId: join.player.playerId, tapCount: 0 }
+        { playerId: joinAPlayer.playerId, tapCount: 1 },
+        { playerId: joinBPlayer.playerId, tapCount: 0 }
       ])
     }
   })
@@ -285,21 +363,41 @@ describe('RoomManager', () => {
       codeGenerator: () => 'TAP2'
     })
 
-    const created = manager.createRoom({
+    manager.createRoom({
       hostSocketId: 'host-socket',
       hostNickname: 'Host',
       maxPlayers: 8
     })
 
-    const join = manager.joinRoom({
+    const joinA = manager.joinRoom({
+      roomCode: 'TAP2',
+      socketId: 'p1-socket',
+      nickname: 'P1'
+    })
+    expect(joinA.ok).toBe(true)
+    if (!joinA.ok) {
+      return
+    }
+    expect(joinA.player).not.toBeNull()
+    if (!joinA.player) {
+      return
+    }
+    const joinAPlayer = joinA.player
+
+    const joinB = manager.joinRoom({
       roomCode: 'TAP2',
       socketId: 'p2-socket',
       nickname: 'P2'
     })
-    expect(join.ok).toBe(true)
-    if (!join.ok) {
+    expect(joinB.ok).toBe(true)
+    if (!joinB.ok) {
       return
     }
+    expect(joinB.player).not.toBeNull()
+    if (!joinB.player) {
+      return
+    }
+    const joinBPlayer = joinB.player
 
     manager.enterReadyPhase({
       roomCode: 'TAP2',
@@ -307,47 +405,47 @@ describe('RoomManager', () => {
     })
     manager.markPlayerReady({
       roomCode: 'TAP2',
-      playerId: created.hostPlayerId
+      playerId: joinAPlayer.playerId
     })
     manager.markPlayerReady({
       roomCode: 'TAP2',
-      playerId: join.player.playerId
+      playerId: joinBPlayer.playerId
     })
 
-    const start = manager.startTapRound({ roomCode: 'TAP2' })
+    const start = manager.startGameRound({ roomCode: 'TAP2' })
     expect(start.ok).toBe(true)
     if (!start.ok) {
       return
     }
 
     nowMs = start.round.startAt + 10
-    manager.submitTapInput({
+    manager.submitPlayerInput({
       roomCode: 'TAP2',
-      playerId: created.hostPlayerId,
+      playerId: joinAPlayer.playerId,
       inputValue: 1
     })
-    manager.submitTapInput({
+    manager.submitPlayerInput({
       roomCode: 'TAP2',
-      playerId: created.hostPlayerId,
+      playerId: joinAPlayer.playerId,
       inputValue: 1
     })
-    manager.submitTapInput({
+    manager.submitPlayerInput({
       roomCode: 'TAP2',
-      playerId: join.player.playerId,
+      playerId: joinBPlayer.playerId,
       inputValue: 1
     })
 
     nowMs = start.round.endAt + 1
-    const events = manager.tickTapRounds()
+    const events = manager.tickGameRounds()
     expect(events).toHaveLength(1)
     expect(events[0].roomCode).toBe('TAP2')
-    expect(events[0].winners).toEqual([created.hostPlayerId])
+    expect(events[0].winners).toEqual([joinAPlayer.playerId])
 
-    const host = events[0].ranking.find((item) => item.playerId === created.hostPlayerId)
-    const p2 = events[0].ranking.find((item) => item.playerId === join.player.playerId)
+    const p1 = events[0].ranking.find((item) => item.playerId === joinAPlayer.playerId)
+    const p2 = events[0].ranking.find((item) => item.playerId === joinBPlayer.playerId)
 
-    expect(host?.tapCount).toBe(2)
-    expect(host?.scoreAfter).toBe(1)
+    expect(p1?.tapCount).toBe(2)
+    expect(p1?.scoreAfter).toBe(1)
     expect(p2?.tapCount).toBe(1)
     expect(p2?.scoreAfter).toBe(0)
   })

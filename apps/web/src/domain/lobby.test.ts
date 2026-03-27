@@ -17,13 +17,13 @@ describe('lobby state reducer', () => {
           roundNo: 1,
           createdAt: 1000
         },
-        playerId: 'p1',
+        playerId: null,
         rejoinToken: 'token-1'
       }
     })
 
     expect(next.room?.roomCode).toBe('ABCD')
-    expect(next.selfPlayerId).toBe('p1')
+    expect(next.selfPlayerId).toBeNull()
     expect(next.rejoinToken).toBe('token-1')
     expect(next.isHost).toBe(true)
   })

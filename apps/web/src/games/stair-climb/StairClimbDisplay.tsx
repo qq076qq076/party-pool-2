@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react'
 import Matter from 'matter-js'
 import { Application, Container, Graphics, Text } from 'pixi.js'
 
+import type { GameDisplayPlayer, GameDisplayProps } from '../types'
+
 const STEP_RISE = 34
 const STEP_WIDTH = 92
 const STEP_HEIGHT = 24
@@ -17,18 +19,6 @@ const LANE_COLORS = [
   { accent: 0xf28482, stair: 0xfbd9d8, shadow: 0xcc6160 },
   { accent: 0x84a59d, stair: 0xd7e2df, shadow: 0x5d756f }
 ]
-
-export interface StairClimbPlayer {
-  playerId: string
-  nickname: string
-}
-
-interface StairClimbDisplayProps {
-  players: StairClimbPlayer[]
-  progress: Record<string, number>
-  countdownSeconds: number | null
-  remainingSeconds: number | null
-}
 
 interface LaneRuntime {
   playerId: string
@@ -61,7 +51,7 @@ class StairClimbScene {
   private readonly lanes = new Map<string, LaneRuntime>()
 
   private app: Application | null = null
-  private players: StairClimbPlayer[] = []
+  private players: GameDisplayPlayer[] = []
   private progress: Record<string, number> = {}
   private countdownSeconds: number | null = null
   private remainingSeconds: number | null = null
@@ -71,7 +61,7 @@ class StairClimbScene {
     this.host = host
   }
 
-  async mount(players: StairClimbPlayer[]): Promise<void> {
+  async mount(players: GameDisplayPlayer[]): Promise<void> {
     const app = new Application()
     await app.init({
       resizeTo: this.host,
@@ -113,7 +103,7 @@ class StairClimbScene {
     }
   }
 
-  setPlayers(players: StairClimbPlayer[]): void {
+  setPlayers(players: GameDisplayPlayer[]): void {
     this.players = players
     const nextIds = new Set(players.map((player) => player.playerId))
 
@@ -385,7 +375,7 @@ export function StairClimbDisplay({
   progress,
   countdownSeconds,
   remainingSeconds
-}: StairClimbDisplayProps) {
+}: GameDisplayProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const sceneRef = useRef<StairClimbScene | null>(null)
 
