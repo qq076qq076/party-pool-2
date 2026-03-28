@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import {
-  buildStairClimbSceneModel,
-  buildStairClimbTextSnapshot,
-  buildStickFigurePose
-} from './sceneModel'
+import { buildStairClimbSceneModel, buildStairClimbTextSnapshot } from './sceneModel'
 
 const players = [
   { playerId: 'p1', nickname: 'Aki' },
@@ -98,29 +94,5 @@ describe('stair climb scene model', () => {
     expect(snapshot.lanes[1]?.climber?.vy).toBe(-8.1)
     expect(snapshot.lanes[1]?.climber?.phase).toBe('stepping')
     expect(snapshot.lanes[2]?.climber).toBeNull()
-  })
-
-  it('builds a clear single-step climbing pose with a lifted moving foot', () => {
-    const pose = buildStickFigurePose({
-      laneLeft: 0,
-      laneWidth: 280,
-      floorY: 640,
-      cameraOffset: 0,
-      displayedStep: 3,
-      poseClockMs: 300,
-      animation: {
-        fromStep: 3,
-        toStep: 4,
-        progress: 0.5
-      }
-    })
-
-    expect(pose.phase).toBe('stepping')
-    expect(pose.movingSide).toBe('left')
-    expect(pose.leftFoot.step).toBe(4)
-    expect(pose.rightFoot.step).toBe(3)
-    expect(pose.leftFoot.point.y).toBeLessThan(pose.rightFoot.point.y)
-    expect(pose.leftKnee.y).toBeLessThan(pose.leftFoot.point.y)
-    expect(pose.movingTrailStart).not.toBeNull()
   })
 })

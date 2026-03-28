@@ -2,19 +2,20 @@ import { useEffect, useRef } from 'react'
 
 import { Application, Container, Graphics, Text } from 'pixi.js'
 
+import { drawStickFigure } from '../../characters/stickFigure/pixi'
+import type { StickFigurePose } from '../../characters/stickFigure/model'
 import type { GameDisplayPlayer, GameDisplayProps } from '../types'
+import { buildStairClimbStickFigurePose } from './climberModel'
 import {
   FLOOR_MARGIN,
   STEP_HEIGHT,
   STEP_WIDTH,
   buildStairClimbSceneModel,
   buildStairClimbTextSnapshot,
-  buildStickFigurePose,
   getStepAnchorByLane,
   type StairClimbLaneModel,
   type StairClimbRuntimeSnapshot,
-  type StairClimbSceneModel,
-  type StairClimbStickFigurePose
+  type StairClimbSceneModel
 } from './sceneModel'
 
 interface StairClimbDisplayProps extends GameDisplayProps {
@@ -276,7 +277,7 @@ class StairClimbScene {
       laneRuntime.nameText.y = laneModel.nameY
 
       const stepAnimation = laneRuntime.stepAnimation
-      const pose = buildStickFigurePose({
+      const pose = buildStairClimbStickFigurePose({
         laneLeft: laneModel.laneLeft,
         laneWidth: laneModel.laneWidth,
         floorY: sceneModel.floorY,
@@ -396,7 +397,7 @@ class StairClimbScene {
   private drawProgressMarker(
     lane: StairClimbLaneModel,
     sceneModel: StairClimbSceneModel,
-    pose: StairClimbStickFigurePose
+    pose: StickFigurePose
   ): void {
     const markerFoot = pose.leftFoot.step >= pose.rightFoot.step ? pose.leftFoot : pose.rightFoot
     const markerX = markerFoot.point.x + 52
@@ -423,100 +424,17 @@ class StairClimbScene {
       .fill({ color: lane.colors.accent })
   }
 
-  private drawClimber(pose: StairClimbStickFigurePose, lane: StairClimbLaneModel): void {
-    const feetCenterX = (pose.leftFoot.point.x + pose.rightFoot.point.x) / 2
-    const feetCenterY = Math.max(pose.leftFoot.point.y, pose.rightFoot.point.y) + 8
-
-    if (pose.movingTrailStart && pose.movingTrailEnd) {
-      this.climberLayer
-        .moveTo(pose.movingTrailStart.x, pose.movingTrailStart.y - 2)
-        .lineTo(pose.movingTrailEnd.x, pose.movingTrailEnd.y - 2)
-        .stroke({ color: lane.colors.accent, alpha: 0.18, width: 5, cap: 'round' })
-    }
-
-    this.climberLayer
-      .ellipse(feetCenterX, feetCenterY, 26, 8)
-      .fill({ color: 0x000000, alpha: 0.08 })
-
-    this.drawLimb(pose.leftShoulder, pose.leftElbow, pose.leftHand, 0x1b1714, 5)
-    this.drawLimb(pose.rightShoulder, pose.rightElbow, pose.rightHand, 0x1b1714, 5)
-    this.drawLimb(pose.hipCenter, pose.leftKnee, pose.leftFoot.point, 0x1b1714, 6)
-    this.drawLimb(pose.hipCenter, pose.rightKnee, pose.rightFoot.point, 0x1b1714, 6)
-
-    this.climberLayer
-      .moveTo(pose.leftShoulder.x, pose.leftShoulder.y)
-      .lineTo(pose.rightShoulder.x, pose.rightShoulder.y)
-      .stroke({ color: lane.colors.shadow, width: 6, cap: 'round' })
-
-    this.climberLayer
-      .moveTo(pose.neck.x, pose.neck.y)
-      .lineTo(pose.hipCenter.x, pose.hipCenter.y)
-      .stroke({ color: lane.colors.accent, width: 8, cap: 'round' })
-
-    this.climberLayer
-      .circle(pose.headCenter.x, pose.headCenter.y, 18)
-      .fill({ color: 0xfffcf5 })
-      .stroke({ color: 0x1b1714, width: 4 })
-
-    this.climberLayer
-      .roundRect(pose.headCenter.x - 19, pose.headCenter.y - 20, 38, 10, 8)
-      .fill({ color: lane.colors.accent })
-
-    this.climberLayer
-      .moveTo(pose.headCenter.x - 6, pose.headCenter.y - 2)
-      .lineTo(pose.headCenter.x - 2, pose.headCenter.y - 1)
-      .stroke({ color: 0x1b1714, width: 2.5, cap: 'round' })
-
-    this.climberLayer
-      .moveTo(pose.headCenter.x + 2, pose.headCenter.y - 1)
-      .lineTo(pose.headCenter.x + 6, pose.headCenter.y - 2)
-      .stroke({ color: 0x1b1714, width: 2.5, cap: 'round' })
-
-    this.climberLayer
-      .moveTo(pose.headCenter.x - 6, pose.headCenter.y + 6)
-      .lineTo(pose.headCenter.x + 6, pose.headCenter.y + 6)
-      .stroke({ color: 0x1b1714, width: 2.5, cap: 'round' })
-
-    this.drawJoint(pose.leftShoulder, lane.colors.accent, 4)
-    this.drawJoint(pose.rightShoulder, lane.colors.accent, 4)
-    this.drawJoint(pose.leftElbow, lane.colors.shadow, 3.5)
-    this.drawJoint(pose.rightElbow, lane.colors.shadow, 3.5)
-    this.drawJoint(pose.leftKnee, lane.colors.shadow, 4)
-    this.drawJoint(pose.rightKnee, lane.colors.shadow, 4)
-    this.drawJoint(pose.hipCenter, lane.colors.accent, 5)
-    this.drawFootCap(pose.leftFoot.point, lane.colors.accent)
-    this.drawFootCap(pose.rightFoot.point, lane.colors.accent)
-  }
-
-  private drawLimb(
-    start: { x: number; y: number },
-    joint: { x: number; y: number },
-    end: { x: number; y: number },
-    color: number,
-    width: number
-  ): void {
-    this.climberLayer
-      .moveTo(start.x, start.y)
-      .lineTo(joint.x, joint.y)
-      .lineTo(end.x, end.y)
-      .stroke({ color, width, cap: 'round', join: 'round' })
-  }
-
-  private drawJoint(point: { x: number; y: number }, color: number, radius: number): void {
-    this.climberLayer.circle(point.x, point.y, radius).fill({ color })
-  }
-
-  private drawFootCap(point: { x: number; y: number }, color: number): void {
-    this.climberLayer
-      .moveTo(point.x - 8, point.y + 1)
-      .lineTo(point.x + 8, point.y + 1)
-      .stroke({ color, width: 4, cap: 'round' })
+  private drawClimber(pose: StickFigurePose, lane: StairClimbLaneModel): void {
+    drawStickFigure(this.climberLayer, pose, {
+      primaryColor: lane.colors.accent,
+      secondaryColor: lane.colors.shadow
+    })
   }
 
   private buildRuntimeSnapshot(
     sceneModel: StairClimbSceneModel,
     laneRuntime: LaneRuntime,
-    pose: StairClimbStickFigurePose,
+    pose: StickFigurePose,
     stepAnimation: StepAnimationState | null
   ): StairClimbRuntimeSnapshot {
     const previousSnapshot = laneRuntime.latestSnapshot
