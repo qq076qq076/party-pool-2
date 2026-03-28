@@ -1,0 +1,24 @@
+Original prompt: 請幫我用這個 skill 優化目前專案的爬樓梯遊戲的建模
+
+- 2026-03-27: 使用 `develop-web-game` skill 開始處理 `stair-climb`。
+- 2026-03-27: 已確認目前前端顯示模型主要只有 `players + progress + countdownSeconds + remainingSeconds`，角色姿態、鏡頭與階梯位置皆由 `StairClimbDisplay.tsx` 即時計算。
+- 2026-03-27: 預計優化方向為前端 scene model 重整，將 lane/climber/camera/ranking 等推導集中，並補齊可測試 hooks 以便 Playwright 驗證。
+- 2026-03-27: 已抽出 stair-climb scene model，加入 ranking/camera/focus/text snapshot 純函式與單元測試。
+- 2026-03-27: Playwright client 首次執行失敗，原因是 skill 腳本在 ~/.codex 路徑下無法解析 playwright ESM 依賴，已改為在 ~/.codex 補臨時套件。
+- 2026-03-27: Playwright browser runtime 未安裝，追加安裝 Chromium 供 web_game_playwright_client 使用。
+- 2026-03-27: Playwright Chromium 啟動時缺少系統函式庫 libnspr4.so，先檢查是否有可直接使用的系統瀏覽器與相關 runtime。
+- 2026-03-27: 由於無系統瀏覽器可用，已下載 libnspr4 / libnss3 套件並解到本地 .tmp/browser-libs，準備以 LD_LIBRARY_PATH 啟動 Playwright。
+- 2026-03-27: 改以 ldd 盤點 Playwright Chromium 所需缺失 shared libraries，避免逐個錯誤迭代。
+- 2026-03-27: 補入本地 libasound2 runtime，修正 Playwright Chromium 缺少 libasound.so.2。
+- 2026-03-27: 發現第一次 Vite 啟動參數錯誤，`127.0.0.1` 被當成位置參數，已改為在 `apps/web` 內直接以 `vite --host 127.0.0.1` 重啟。
+- 2026-03-27: 已補上 `App.css` 供 debug scene 使用，並新增 `public/favicon.svg` 清除驗證期間的 404 噪音。
+- 2026-03-27: 已以 Playwright skill client 驗證一般互動與高樓層鏡頭場景，`render_game_to_text` 與畫面中的排名、倒數、焦點 lane、cameraOffset 一致，且無新的 console/page errors。
+- 2026-03-27: 為了讓 headless WebGL 截圖可靠，Pixi renderer 已加上 `preserveDrawingBuffer: true`。
+- 2026-03-27: `?debugScene=stair-climb` 預覽入口目前限定於 Vite dev mode，不會影響正式環境。
+- 2026-03-27: 已將 stair-climb 人物改為逐階 step animation runtime，並以純函式 pose model 產生火柴人關節姿態。
+- 2026-03-27: 已以 Playwright 驗證單步跨階、連續多步與高樓層鏡頭；stepProgress 會逐階切換，畫面可見明確抬膝、撐腳與擺臂。
+- 2026-03-29: 已將人物建模拆成 `apps/web/src/characters/stickFigure/` 共用模組，抽離出可重用的骨架姿態生成 `model.ts` 與 Pixi 繪製器 `pixi.ts`。
+- 2026-03-29: `stair-climb` 目前改為只保留樓梯幾何與適配層，新增 `stairGeometry.ts` 與 `climberModel.ts`，由場景提供腳點/步態資訊後再呼叫共用人物模組。
+- 2026-03-29: 已補上共用人物模組測試 `characters/stickFigure/model.test.ts` 與樓梯適配測試 `games/stair-climb/climberModel.test.ts`，`npm run typecheck -w web` 與 `npm run test -w web` 皆通過。
+- 2026-03-29: 已重新跑 Playwright debug scene 驗證共用建模整合；驗證期間產生的 `state-0..2.json` 顯示 `phase/movingSide/stepProgress` 正常切換，且無 `errors-*.json` 產生。
+- 2026-03-29: 此環境仍缺少 Playwright Chromium 所需的 `libnspr4/libnss3/libasound.so.2`，本次以 `apt download` 抽到本地 `.tmp/browser-libs` 後透過 `LD_LIBRARY_PATH=/home/walker/project/party-pool-2/.tmp/browser-libs/usr/lib/x86_64-linux-gnu` 執行驗證。
